@@ -230,6 +230,7 @@ V1 should produce:
 - validated clip outputs ready for Jianying merge
 - a failure queue for manual follow-up
 - logs, screenshots, and a batch report for traceability
+- a manual smoke test checklist for one real browser session before full-batch use
 
 ## File Planning
 
