@@ -1,3 +1,4 @@
+from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,13 @@ class ChatGptReferenceRequest:
     frame_path: Path
     output_path: Path
     prompt: str
+
+
+class RunningHubTaskStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
 
 
 def build_runninghub_payload(request: ClipExecutionRequest) -> dict[str, str]:
@@ -42,3 +50,7 @@ def build_chatgpt_reference_job(
         output_path=output_path,
         prompt=prompt,
     )
+
+
+def is_terminal_runninghub_state(status: RunningHubTaskStatus) -> bool:
+    return status in {RunningHubTaskStatus.DONE, RunningHubTaskStatus.FAILED}
