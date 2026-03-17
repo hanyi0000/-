@@ -39,3 +39,11 @@ def plan_prepare_run(project_dir: Path, clip_count: int) -> PrepareRunPlan:
         frames_dir=work_dir / "frames",
         manifest_path=work_dir / "manifest.json",
     )
+
+
+def build_single_clip_flow_summary(project_dir: Path, clip_id: str) -> dict[str, str]:
+    return {
+        "clip_id": clip_id,
+        "manifest_path": str(project_dir / "work" / "manifest.json"),
+        "render_output": str(project_dir / "output" / "rendered" / f"{clip_id}.mp4"),
+    }
