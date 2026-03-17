@@ -1,0 +1,17 @@
+source_video: input/source.mp4
+
+split:
+  mode: fixed_duration
+  seconds: 2
+
+browser:
+  profile_dir: browser/profile
+  headless: false
+
+runninghub:
+  workflow_url: https://example.com/workflow
+
+actors:
+  actor_a:
+    character: jett
+    reference_image: input/jett.png
