@@ -7,9 +7,10 @@ from scripts.browser_video_remix.runninghub_page import RunningHubPageAdapter
 
 
 class FakeLocator:
-    def __init__(self, *, count: int = 0, visible: bool = False) -> None:
+    def __init__(self, *, count: int = 0, visible: bool = False, text: str = "") -> None:
         self._count = count
         self._visible = visible
+        self._text = text
         self.input_files: list[str] = []
         self.filled_values: list[str] = []
         self.clicks = 0
@@ -28,6 +29,12 @@ class FakeLocator:
 
     def click(self) -> None:
         self.clicks += 1
+
+    def inner_text(self) -> str:
+        return self._text
+
+    def text_content(self) -> str:
+        return self._text
 
 
 class FakeChatGptPage:
@@ -53,6 +60,26 @@ class FakeChatGptPage:
         if text.endswith(".png"):
             return FakeLocator(count=1, visible=True)
         return FakeLocator()
+
+
+class FakeRunningHubPage:
+    def __init__(self, task_id: str = "task-123") -> None:
+        self.task_id = task_id
+        self.goto_calls: list[tuple[str, str]] = []
+        self.locators = {
+            "#video-upload": FakeLocator(count=1),
+            "#image-upload": FakeLocator(count=1),
+            "input[name='width']": FakeLocator(count=1, visible=True),
+            "input[name='height']": FakeLocator(count=1, visible=True),
+            "button[data-testid='submit-workflow']": FakeLocator(count=1, visible=True),
+            "[data-testid='task-id']": FakeLocator(count=1, visible=True, text=task_id),
+        }
+
+    def goto(self, url: str, wait_until: str) -> None:
+        self.goto_calls.append((url, wait_until))
+
+    def locator(self, selector: str) -> FakeLocator:
+        return self.locators.get(selector, FakeLocator())
 
 
 class FakeChatGptAdapter:
@@ -130,7 +157,7 @@ def test_run_single_clip_live_flow_builds_adapter_requests_for_real_adapters(
             rendered_output_path=tmp_path / "output" / "rendered" / "clip-0001.mp4",
         ),
         chatgpt_page=FakeChatGptPage(),
-        runninghub_page=type("Page", (), {"task_id": "task-123"})(),
+        runninghub_page=FakeRunningHubPage(),
         chatgpt_adapter=ChatGptPageAdapter(start_url="https://chatgpt.com/g/test"),
         runninghub_adapter=RunningHubPageAdapter(workflow_url="https://example.com/workflow"),
     )
