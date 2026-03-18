@@ -13,6 +13,13 @@ class LiveRunRequest:
     rendered_output_path: Path
 
 
+@dataclass(frozen=True)
+class ChatGptSnapshotRequest:
+    url: str
+    screenshot_path: Path
+    html_path: Path
+
+
 def build_project_paths(project_dir: Path) -> ProjectPaths:
     return _build_project_paths(project_dir)
 
@@ -31,9 +38,23 @@ def build_live_run_request(project_dir: Path, clip_id: str) -> LiveRunRequest:
     )
 
 
+def build_chatgpt_snapshot_request(
+    project_dir: Path,
+    start_url: str,
+) -> ChatGptSnapshotRequest:
+    paths = _build_project_paths(project_dir)
+    return ChatGptSnapshotRequest(
+        url=start_url,
+        screenshot_path=paths.logs_dir / "chatgpt-page.png",
+        html_path=paths.logs_dir / "chatgpt-page.html",
+    )
+
+
 __all__ = [
+    "ChatGptSnapshotRequest",
     "LiveRunRequest",
     "ProjectPaths",
+    "build_chatgpt_snapshot_request",
     "build_live_run_request",
     "build_project_paths",
     "build_single_clip_flow_summary",

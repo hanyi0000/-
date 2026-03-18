@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from .browser_executor import AdapterResult, ChatGptReferenceRequest
 from .live_state import PauseReason
+from .playwright_driver import capture_page_snapshot
 
 
 class ChatGptPageAdapter:
@@ -21,4 +24,18 @@ class ChatGptPageAdapter:
             status="completed",
             output_path=request.output_path,
             pause_reason=None,
+        )
+
+    def capture_snapshot(
+        self,
+        context: object,
+        screenshot_path: Path,
+        html_path: Path,
+        snapshotter: object = capture_page_snapshot,
+    ) -> None:
+        snapshotter(
+            context=context,
+            url=self.start_url,
+            screenshot_path=screenshot_path,
+            html_path=html_path,
         )

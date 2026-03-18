@@ -1,3 +1,5 @@
 .pytest_cache/
 .pytest_tmp/
 __pycache__/
+browser/
+logs/
