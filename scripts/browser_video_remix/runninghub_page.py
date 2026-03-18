@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from .browser_executor import (
@@ -139,6 +140,40 @@ class RunningHubPageAdapter:
                 PauseReason.MANUAL_CONFIRMATION_REQUIRED,
             )
         return RunningHubDownloadResult("downloaded", output_path, None)
+
+    def capture_failure_snapshot(
+        self,
+        page: object,
+        screenshot_path: Path,
+        html_path: Path,
+        summary_path: Path,
+    ) -> None:
+        screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+
+        screenshotter = getattr(page, "screenshot", None)
+        if callable(screenshotter):
+            screenshotter(path=screenshot_path.as_posix(), full_page=True)
+        else:
+            screenshot_path.write_bytes(b"")
+
+        content_getter = getattr(page, "content", None)
+        html = content_getter() if callable(content_getter) else ""
+        html_path.write_text(str(html), encoding="utf-8")
+
+        title_getter = getattr(page, "title", None)
+        title = title_getter() if callable(title_getter) else ""
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "url": str(getattr(page, "url", "")),
+                    "title": str(title),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
     def _find_required_locator(self, page: object, selector: str) -> object | None:
         locator_factory = getattr(page, "locator", None)

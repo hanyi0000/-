@@ -7,6 +7,7 @@ from .browser_executor import (
     build_chatgpt_reference_job,
 )
 from .live_state import LiveClipState, load_live_state, save_live_state
+from .paths import build_project_paths
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,7 @@ def run_single_clip_live_flow(
         step: str,
         runninghub_task_id: str | None,
         pause_reason: object,
+        last_screenshot_path: Path | None = None,
     ) -> None:
         save_live_state(
             request.state_path,
@@ -77,9 +79,26 @@ def run_single_clip_live_flow(
                 runninghub_task_id=runninghub_task_id,
                 pause_reason=pause_reason,
                 last_error=None,
-                last_screenshot_path=None,
+                last_screenshot_path=last_screenshot_path,
             ),
         )
+
+    def capture_runninghub_pause_artifacts() -> Path | None:
+        snapshotter = getattr(runninghub_adapter, "capture_failure_snapshot", None)
+        if not callable(snapshotter):
+            return None
+        pause_dir = build_project_paths(request.state_path.parents[2]).runninghub_pauses_dir
+        clip_pause_dir = pause_dir / request.clip_id
+        screenshot_path = clip_pause_dir / "pause.png"
+        html_path = clip_pause_dir / "pause.html"
+        summary_path = clip_pause_dir / "pause.json"
+        snapshotter(
+            runninghub_page,
+            screenshot_path,
+            html_path,
+            summary_path,
+        )
+        return screenshot_path
 
     reference_result = chatgpt_adapter.submit_reference_generation(
         chatgpt_page,
@@ -104,10 +123,12 @@ def run_single_clip_live_flow(
             runninghub_request,
         )
         if runninghub_result.pause_reason is not None:
+            screenshot_path = capture_runninghub_pause_artifacts()
             persist_state(
                 step="paused",
                 runninghub_task_id=runninghub_result.task_id,
                 pause_reason=runninghub_result.pause_reason,
+                last_screenshot_path=screenshot_path,
             )
             return build_result(
                 "" if runninghub_result.task_id is None else str(runninghub_result.task_id),
@@ -122,10 +143,12 @@ def run_single_clip_live_flow(
 
     poll_result = runninghub_adapter.poll_render_status(runninghub_page, task_id)
     if poll_result.pause_reason is not None:
+        screenshot_path = capture_runninghub_pause_artifacts()
         persist_state(
             step="paused",
             runninghub_task_id=task_id,
             pause_reason=poll_result.pause_reason,
+            last_screenshot_path=screenshot_path,
         )
         return build_result(task_id, reference_result.output_path)
     persist_state(
@@ -148,10 +171,12 @@ def run_single_clip_live_flow(
         request.rendered_output_path,
     )
     if download_result.pause_reason is not None:
+        screenshot_path = capture_runninghub_pause_artifacts()
         persist_state(
             step="paused",
             runninghub_task_id=task_id,
             pause_reason=download_result.pause_reason,
+            last_screenshot_path=screenshot_path,
         )
         return build_result(task_id, reference_result.output_path)
 

@@ -14,6 +14,7 @@ class ProjectPaths:
     output_rendered_dir: Path
     output_failed_dir: Path
     logs_dir: Path
+    runninghub_pauses_dir: Path
 
 
 def build_project_paths(project_dir: Path) -> ProjectPaths:
@@ -31,4 +32,5 @@ def build_project_paths(project_dir: Path) -> ProjectPaths:
         output_rendered_dir=output_dir / "rendered",
         output_failed_dir=output_dir / "failed",
         logs_dir=project_dir / "logs",
+        runninghub_pauses_dir=project_dir / "logs" / "runninghub-pauses",
     )

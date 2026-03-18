@@ -60,21 +60,28 @@ Use one short clip only.
 11. Submit the workflow and capture the returned task ID.
 12. Wait for completion and download the rendered clip.
 13. Confirm the output lands in the rendered output directory with the expected clip ID.
+14. If RunningHub pauses, confirm pause evidence is written under `logs/runninghub-pauses/<clip_id>/` as:
+    - `pause.png`
+    - `pause.html`
+    - `pause.json`
+    - and that `work/live_state/<clip_id>.json` records `last_screenshot_path`
 
 ## Resume Checklist
 
 1. Stop the process after one successful step.
 2. Restart the pipeline.
 3. Confirm the live state file records the last completed step and any pause reason.
-4. Confirm already completed steps are skipped.
-5. Confirm failed or incomplete steps remain pending.
+4. If the stop occurred on a RunningHub pause, confirm the saved state points to the captured pause screenshot.
+5. Confirm already completed steps are skipped.
+6. Confirm failed or incomplete steps remain pending.
 
 ## Validation Checklist
 
 1. Confirm missing outputs are reported explicitly.
 2. Confirm output files are grouped into success and failure destinations.
 3. Confirm logs and screenshots are retained for failed browser steps.
-4. Confirm the final report lists ready clips and failed clips separately.
+4. Confirm RunningHub pause evidence includes screenshot, page HTML, and JSON summary artifacts.
+5. Confirm the final report lists ready clips and failed clips separately.
 
 ## Exit Criteria
 

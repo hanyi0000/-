@@ -8,6 +8,7 @@ from scripts.browser_video_remix.live_state import (
     load_live_state,
     save_live_state,
 )
+from scripts.browser_video_remix.paths import build_project_paths
 from scripts.browser_video_remix.runninghub_page import RunningHubPageAdapter
 
 
@@ -150,6 +151,7 @@ class FakeRunningHubAdapter:
         self.submit_calls = 0
         self.poll_calls = 0
         self.download_calls = 0
+        self.snapshot_calls = 0
         self._submit_result = submit_result or {
             "status": "submitted",
             "task_id": "task-123",
@@ -186,6 +188,22 @@ class FakeRunningHubAdapter:
         if payload.get("output_path") is None and payload["status"] == "downloaded":
             payload["output_path"] = output_path
         return type("Result", (), payload)()
+
+    def capture_failure_snapshot(
+        self,
+        page: object,
+        screenshot_path: Path,
+        html_path: Path,
+        summary_path: Path,
+    ) -> None:
+        del page
+        self.snapshot_calls += 1
+        screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        screenshot_path.write_bytes(b"png-bytes")
+        html_path.write_text("<html>pause</html>", encoding="utf-8")
+        summary_path.write_text('{"status":"paused"}', encoding="utf-8")
 
 
 class FakePausedChatGptAdapter:
@@ -354,3 +372,41 @@ def test_run_single_clip_live_flow_resumes_polling_without_resubmitting(
 
     assert runninghub_adapter.submit_calls == 0
     assert runninghub_adapter.poll_calls == 1
+
+
+def test_run_single_clip_live_flow_saves_runninghub_pause_artifacts(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "work" / "live_state" / "clip-0001.json"
+    runninghub_adapter = FakeRunningHubAdapter(
+        submit_result={
+            "status": "paused",
+            "task_id": None,
+            "pause_reason": PauseReason.SELECTOR_MISSING,
+        },
+    )
+
+    run_single_clip_live_flow(
+        request=LiveClipRequest(
+            clip_id="clip-0001",
+            clip_path=tmp_path / "work" / "clips" / "clip-0001.mp4",
+            frame_path=tmp_path / "work" / "frames" / "clip-0001.png",
+            prompt="replace actor_a with jett",
+            state_path=state_path,
+            rendered_output_path=tmp_path / "output" / "rendered" / "clip-0001.mp4",
+        ),
+        chatgpt_page=object(),
+        runninghub_page=object(),
+        chatgpt_adapter=FakeChatGptAdapter(),
+        runninghub_adapter=runninghub_adapter,
+    )
+
+    pause_dir = build_project_paths(tmp_path).runninghub_pauses_dir / "clip-0001"
+    saved_state = load_live_state(state_path)
+
+    assert runninghub_adapter.snapshot_calls == 1
+    assert saved_state.pause_reason == PauseReason.SELECTOR_MISSING
+    assert saved_state.last_screenshot_path == pause_dir / "pause.png"
+    assert saved_state.last_screenshot_path.exists() is True
+    assert (pause_dir / "pause.html").exists() is True
+    assert (pause_dir / "pause.json").exists() is True
