@@ -37,6 +37,7 @@ Verify the browser video remix pipeline can run one clip end to end before attem
    - confirm `build_project_paths()` resolves the expected project layout
    - confirm `plan_prepare_run()` points to `work/clips`, `work/frames`, and `work/manifest.json`
    - confirm `build_single_clip_flow_summary()` points to the expected manifest and rendered output target
+   - confirm `build_live_run_request()` points to `work/live_state/<clip_id>.json` and `work/downloads`
 
 ## Single-Clip Browser Smoke Test
 
@@ -46,23 +47,27 @@ Use one short clip only.
 2. Build a one-clip summary and confirm:
    - the manifest target ends with `work/manifest.json`
    - the rendered output target ends with `output/rendered/<clip_id>.mp4`
-3. Launch the browser executor with a persistent profile.
-4. Confirm ChatGPT opens with the authenticated session intact.
-5. Upload the frame and submit the generated prompt.
-6. Confirm one reference image is produced and saved to the expected working directory.
-7. Open the configured RunningHub workflow page.
-8. Upload the clip and reference image.
-9. Confirm the submitted resolution matches the clip resolution.
-10. Submit the workflow and capture the returned task ID.
-11. Wait for completion and download the rendered clip.
-12. Confirm the output lands in the rendered output directory with the expected clip ID.
+3. Build the live run request and confirm:
+   - the state file target ends with `work/live_state/<clip_id>.json`
+   - the download directory target ends with `work/downloads`
+4. Launch the browser executor with a persistent profile.
+5. Confirm ChatGPT opens with the authenticated session intact.
+6. Upload the frame and submit the generated prompt.
+7. Confirm one reference image is produced and saved to the expected working directory.
+8. Open the configured RunningHub workflow page.
+9. Upload the clip and reference image.
+10. Confirm the submitted resolution matches the clip resolution.
+11. Submit the workflow and capture the returned task ID.
+12. Wait for completion and download the rendered clip.
+13. Confirm the output lands in the rendered output directory with the expected clip ID.
 
 ## Resume Checklist
 
 1. Stop the process after one successful step.
 2. Restart the pipeline.
-3. Confirm already completed steps are skipped.
-4. Confirm failed or incomplete steps remain pending.
+3. Confirm the live state file records the last completed step and any pause reason.
+4. Confirm already completed steps are skipped.
+5. Confirm failed or incomplete steps remain pending.
 
 ## Validation Checklist
 
