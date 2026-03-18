@@ -76,3 +76,26 @@ def test_load_project_config_reads_live_browser_settings(tmp_path: Path) -> None
     assert config.browser.downloads_dir.as_posix() == "work/downloads"
     assert config.browser.default_timeout_ms == 15000
     assert config.runninghub.poll_interval_seconds == 5
+
+
+def test_load_project_config_reads_proxy_browser_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source_video: input/source.mp4\n"
+        "browser:\n"
+        "  profile_dir: browser/profile\n"
+        "  downloads_dir: work/downloads\n"
+        "  executable_path: D:/Chrome135_AllNew_2026.1.20/App/chrome.exe\n"
+        "  proxy_server: socks5://127.0.0.1:1080\n"
+        "  headless: false\n"
+        "actors:\n"
+        "  actor_a:\n"
+        "    character: jett\n"
+        "    reference_image: input/jett.png\n",
+        encoding="utf-8",
+    )
+
+    config = load_project_config(config_path)
+
+    assert config.browser.executable_path.as_posix() == "D:/Chrome135_AllNew_2026.1.20/App/chrome.exe"
+    assert config.browser.proxy_server == "socks5://127.0.0.1:1080"

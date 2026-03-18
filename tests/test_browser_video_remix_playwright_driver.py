@@ -2,7 +2,9 @@ from pathlib import Path
 
 from scripts.browser_video_remix.playwright_driver import (
     BrowserLaunchRequest,
+    HysteriaLaunchRequest,
     PersistentContextRequest,
+    build_hysteria_command,
     build_browser_launch_options,
     build_persistent_context_options,
     capture_page_snapshot,
@@ -37,6 +39,22 @@ def test_build_persistent_context_options_sets_downloads_and_timeout() -> None:
     assert options["downloads_path"] == "work/downloads"
     assert options["accept_downloads"] is True
     assert options["default_timeout_ms"] == 15000
+
+
+def test_build_persistent_context_options_includes_proxy_and_executable_path() -> None:
+    request = PersistentContextRequest(
+        profile_dir=Path("browser/profile"),
+        downloads_dir=Path("work/downloads"),
+        default_timeout_ms=15000,
+        headless=False,
+        executable_path=Path("D:/Chrome135_AllNew_2026.1.20/App/chrome.exe"),
+        proxy_server="socks5://127.0.0.1:1080",
+    )
+
+    options = build_persistent_context_options(request)
+
+    assert options["executable_path"] == "D:/Chrome135_AllNew_2026.1.20/App/chrome.exe"
+    assert options["proxy"] == {"server": "socks5://127.0.0.1:1080"}
 
 
 def test_resolve_browser_channel_prefers_msedge_when_present() -> None:
@@ -115,3 +133,18 @@ def test_capture_page_snapshot_writes_html_and_screenshot(tmp_path: Path) -> Non
     assert captured["wait_until"] == "domcontentloaded"
     assert captured["full_page"] is True
     assert html_path.read_text(encoding="utf-8") == "<html>ok</html>"
+
+
+def test_build_hysteria_command_uses_config_file() -> None:
+    command = build_hysteria_command(
+        HysteriaLaunchRequest(
+            executable_path=Path("D:/Chrome135_AllNew_2026.1.20/hysteria2/hysteria2.exe"),
+            config_path=Path("D:/Chrome135_AllNew_2026.1.20/hysteria2/config.json"),
+        )
+    )
+
+    assert command == [
+        "D:/Chrome135_AllNew_2026.1.20/hysteria2/hysteria2.exe",
+        "-c",
+        "D:/Chrome135_AllNew_2026.1.20/hysteria2/config.json",
+    ]

@@ -28,6 +28,8 @@ class BrowserConfig:
     downloads_dir: Path
     default_timeout_ms: int
     headless: bool
+    executable_path: Path | None
+    proxy_server: str | None
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,12 @@ def load_project_config(config_path: Path) -> ProjectConfig:
             downloads_dir=Path(browser.get("downloads_dir", "work/downloads")),
             default_timeout_ms=int(browser.get("default_timeout_ms", 15000)),
             headless=bool(browser.get("headless", False)),
+            executable_path=(
+                Path(browser["executable_path"])
+                if browser.get("executable_path")
+                else None
+            ),
+            proxy_server=browser.get("proxy_server"),
         ),
         runninghub=RunningHubConfig(
             workflow_url=runninghub.get("workflow_url", ""),

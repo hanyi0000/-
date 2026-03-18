@@ -16,6 +16,14 @@ class PersistentContextRequest:
     downloads_dir: Path
     default_timeout_ms: int
     headless: bool
+    executable_path: Path | None = None
+    proxy_server: str | None = None
+
+
+@dataclass(frozen=True)
+class HysteriaLaunchRequest:
+    executable_path: Path
+    config_path: Path
 
 
 def build_browser_launch_options(request: BrowserLaunchRequest) -> dict[str, str | bool]:
@@ -28,13 +36,26 @@ def build_browser_launch_options(request: BrowserLaunchRequest) -> dict[str, str
 def build_persistent_context_options(
     request: PersistentContextRequest,
 ) -> dict[str, str | bool | int]:
-    return {
+    options: dict[str, str | bool | int | dict[str, str]] = {
         "user_data_dir": request.profile_dir.as_posix(),
         "downloads_path": request.downloads_dir.as_posix(),
         "accept_downloads": True,
         "default_timeout_ms": request.default_timeout_ms,
         "headless": request.headless,
     }
+    if request.executable_path is not None:
+        options["executable_path"] = request.executable_path.as_posix()
+    if request.proxy_server:
+        options["proxy"] = {"server": request.proxy_server}
+    return options
+
+
+def build_hysteria_command(request: HysteriaLaunchRequest) -> list[str]:
+    return [
+        request.executable_path.as_posix(),
+        "-c",
+        request.config_path.as_posix(),
+    ]
 
 
 def resolve_browser_channel(
@@ -60,7 +81,7 @@ def launch_persistent_context(
     channel = resolve_browser_channel(
         preferred_channel=None,
         edge_path_exists=resolved_edge_exists,
-    )
+    ) if request.executable_path is None else None
     options = build_persistent_context_options(request)
     user_data_dir = str(options.pop("user_data_dir"))
     default_timeout_ms = int(options.pop("default_timeout_ms"))
