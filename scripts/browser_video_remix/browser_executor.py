@@ -37,6 +37,20 @@ class RunningHubSubmitResult:
     pause_reason: PauseReason | None
 
 
+@dataclass(frozen=True)
+class RunningHubPollResult:
+    status: "RunningHubTaskStatus"
+    task_id: str
+    pause_reason: PauseReason | None
+
+
+@dataclass(frozen=True)
+class RunningHubDownloadResult:
+    status: str
+    output_path: Path | None
+    pause_reason: PauseReason | None
+
+
 class RunningHubTaskStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"

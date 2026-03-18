@@ -1,4 +1,12 @@
-from .browser_executor import ClipExecutionRequest, RunningHubSubmitResult
+from pathlib import Path
+
+from .browser_executor import (
+    ClipExecutionRequest,
+    RunningHubDownloadResult,
+    RunningHubPollResult,
+    RunningHubSubmitResult,
+    RunningHubTaskStatus,
+)
 from .live_state import PauseReason
 
 
@@ -9,6 +17,8 @@ class RunningHubPageAdapter:
     HEIGHT_INPUT_SELECTORS = ("input[name='height']", "#height")
     SUBMIT_BUTTON_SELECTORS = ("button[data-testid='submit-workflow']", "button")
     TASK_ID_SELECTORS = ("[data-testid='task-id']", "[data-task-id]")
+    TASK_STATUS_SELECTORS = ("[data-testid='task-status']", "[data-task-status]")
+    DOWNLOAD_BUTTON_SELECTORS = ("button[data-testid='download-render']", "a[download]")
 
     def __init__(self, workflow_url: str) -> None:
         self.workflow_url = workflow_url
@@ -87,6 +97,49 @@ class RunningHubPageAdapter:
             pause_reason=None,
         )
 
+    def poll_render_status(self, page: object, task_id: str) -> RunningHubPollResult:
+        status_text = self._read_task_status_text(page, task_id).lower()
+        if status_text == RunningHubTaskStatus.DONE.value:
+            return RunningHubPollResult(RunningHubTaskStatus.DONE, task_id, None)
+        if status_text == RunningHubTaskStatus.FAILED.value:
+            return RunningHubPollResult(RunningHubTaskStatus.FAILED, task_id, None)
+        if status_text == RunningHubTaskStatus.RUNNING.value:
+            return RunningHubPollResult(RunningHubTaskStatus.RUNNING, task_id, None)
+        return RunningHubPollResult(RunningHubTaskStatus.PENDING, task_id, None)
+
+    def download_render_output(self, page: object, output_path: Path) -> RunningHubDownloadResult:
+        download_button = self._find_first_available_locator(
+            page,
+            self.DOWNLOAD_BUTTON_SELECTORS,
+            require_visible=True,
+        )
+        if download_button is None:
+            return RunningHubDownloadResult(
+                "paused",
+                None,
+                PauseReason.SELECTOR_MISSING,
+            )
+
+        expect_download = getattr(page, "expect_download", None)
+        if not callable(expect_download):
+            return RunningHubDownloadResult(
+                "failed",
+                None,
+                PauseReason.MANUAL_CONFIRMATION_REQUIRED,
+            )
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with expect_download() as pending_download:
+            download_button.click()
+        pending_download.value.save_as(output_path.as_posix())
+        if not output_path.exists() or output_path.stat().st_size <= 0:
+            return RunningHubDownloadResult(
+                "failed",
+                None,
+                PauseReason.MANUAL_CONFIRMATION_REQUIRED,
+            )
+        return RunningHubDownloadResult("downloaded", output_path, None)
+
     def _find_required_locator(self, page: object, selector: str) -> object | None:
         locator_factory = getattr(page, "locator", None)
         if not callable(locator_factory):
@@ -133,6 +186,32 @@ class RunningHubPageAdapter:
         if task_id is None:
             return None
         return str(task_id).strip() or None
+
+    def _read_task_status_text(self, page: object, task_id: str) -> str:
+        del task_id
+        for selector in self.TASK_STATUS_SELECTORS:
+            locator = self._find_required_locator(page, selector)
+            if locator is None:
+                continue
+            value = self._read_locator_text(locator)
+            if value:
+                return value
+        return str(getattr(page, "task_status", "")).strip()
+
+    def _read_locator_text(self, locator: object) -> str:
+        for reader_name in ("inner_text", "text_content"):
+            reader = getattr(locator, reader_name, None)
+            if callable(reader):
+                value = str(reader()).strip()
+                if value:
+                    return value
+        attribute_reader = getattr(locator, "get_attribute", None)
+        if callable(attribute_reader):
+            for attribute_name in ("data-task-id", "data-task-status"):
+                value = attribute_reader(attribute_name)
+                if value:
+                    return str(value).strip()
+        return ""
 
     def _locator_count(self, locator: object) -> int:
         counter = getattr(locator, "count", None)
