@@ -50,6 +50,8 @@ class FakeChatGptPage:
         return FakeLocator()
 
     def get_by_text(self, text: str) -> FakeLocator:
+        if text.endswith(".png"):
+            return FakeLocator(count=1, visible=True)
         return FakeLocator()
 
 

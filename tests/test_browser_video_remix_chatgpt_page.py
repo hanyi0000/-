@@ -48,12 +48,14 @@ class FakeChatGptPage:
         has_prompt_textarea: bool = True,
         has_upload_photos_input: bool = True,
         has_contenteditable_prompt: bool = False,
+        attachment_visible: bool = False,
         url: str = "https://chatgpt.com/g/test",
         html: str = "",
     ) -> None:
         self.goto_calls: list[tuple[str, str]] = []
         self.url = url
         self.html = html
+        self.attachment_visible = attachment_visible
         self.locators: dict[str, FakeLocator] = {}
         if has_file_input:
             self.locators["#upload-files"] = FakeLocator(count=1)
@@ -80,7 +82,11 @@ class FakeChatGptPage:
             ChatGptPageAdapter.LOGIN_REQUIRED_TEXT: FakeLocator(
                 count=1 if login_gate_visible else 0,
                 visible=login_gate_visible,
-            )
+            ),
+            "chatgpt-edge-proxy-smoke.png": FakeLocator(
+                count=1 if attachment_visible else 0,
+                visible=attachment_visible,
+            ),
         }
 
     def goto(self, url: str, wait_until: str) -> None:
@@ -94,6 +100,8 @@ class FakeChatGptPage:
         return self.role_locators.get((role, name), FakeLocator())
 
     def get_by_text(self, text: str) -> FakeLocator:
+        if self.attachment_visible and text.endswith(".png"):
+            return FakeLocator(count=1, visible=True)
         return self.text_locators.get(text, FakeLocator())
 
     def content(self) -> str:
@@ -152,7 +160,7 @@ def test_chatgpt_adapter_pauses_when_cloudflare_challenge_is_present() -> None:
 
 def test_chatgpt_adapter_submit_reference_generation_uploads_frame_and_prompt() -> None:
     adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
-    page = FakeChatGptPage()
+    page = FakeChatGptPage(attachment_visible=True)
     request = ChatGptReferenceRequest(
         clip_id="clip-0001",
         frame_path=Path("work/frames/clip-0001.png"),
@@ -177,6 +185,7 @@ def test_chatgpt_adapter_uses_contenteditable_prompt_when_textarea_is_missing() 
         page=FakeChatGptPage(
             has_prompt_textarea=False,
             has_contenteditable_prompt=True,
+            attachment_visible=True,
         ),
         request=ChatGptReferenceRequest(
             clip_id="clip-0001",
@@ -188,6 +197,23 @@ def test_chatgpt_adapter_uses_contenteditable_prompt_when_textarea_is_missing() 
 
     assert result.status == "submitted"
     assert result.pause_reason is None
+
+
+def test_chatgpt_adapter_pauses_when_attachment_is_not_confirmed() -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    page = FakeChatGptPage(attachment_visible=False)
+    request = ChatGptReferenceRequest(
+        clip_id="clip-0001",
+        frame_path=Path("work/frames/chatgpt-edge-proxy-smoke.png"),
+        output_path=Path("work/chatgpt_refs/clip-0001.png"),
+        prompt="replace actor_a with jett",
+    )
+
+    result = adapter.submit_reference_generation(page=page, request=request)
+
+    assert page.locators["[data-testid='send-button']"].clicks == 0
+    assert result.status == "paused"
+    assert result.pause_reason == PauseReason.MANUAL_CONFIRMATION_REQUIRED
 
 
 def test_chatgpt_adapter_pauses_when_all_prompt_inputs_are_missing() -> None:

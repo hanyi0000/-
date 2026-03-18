@@ -70,6 +70,12 @@ class ChatGptPageAdapter:
 
         file_input.set_input_files(request.frame_path.as_posix())
         prompt_input.fill(request.prompt)
+        if not self._is_attachment_ready(page, request.frame_path):
+            return AdapterResult(
+                status="paused",
+                output_path=None,
+                pause_reason=PauseReason.MANUAL_CONFIRMATION_REQUIRED,
+            )
         send_button.click()
         return AdapterResult(
             status="submitted",
@@ -110,6 +116,13 @@ class ChatGptPageAdapter:
             return False
         html = content_getter()
         return "/cdn-cgi/challenge-platform/" in html
+
+    def _is_attachment_ready(self, page: object, frame_path: Path) -> bool:
+        filename_match = self._get_by_text(page, frame_path.name)
+        if filename_match is not None and self._locator_is_visible(filename_match):
+            return True
+        attachment_locator = self._find_required_locator(page, "[data-testid*='attachment']")
+        return attachment_locator is not None and self._locator_is_visible(attachment_locator)
 
     def _find_required_locator(self, page: object, selector: str) -> object | None:
         locator_factory = getattr(page, "locator", None)
