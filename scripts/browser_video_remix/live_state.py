@@ -35,6 +35,7 @@ def save_live_state(path: Path, state: LiveClipState) -> None:
         "last_error": state.last_error,
         "last_screenshot_path": state.last_screenshot_path.as_posix() if state.last_screenshot_path else None,
     }
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 

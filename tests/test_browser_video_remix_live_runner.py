@@ -2,7 +2,12 @@ from pathlib import Path
 
 from scripts.browser_video_remix.chatgpt_page import ChatGptPageAdapter
 from scripts.browser_video_remix.live_runner import LiveClipRequest, run_single_clip_live_flow
-from scripts.browser_video_remix.live_state import PauseReason, load_live_state
+from scripts.browser_video_remix.live_state import (
+    LiveClipState,
+    PauseReason,
+    load_live_state,
+    save_live_state,
+)
 from scripts.browser_video_remix.runninghub_page import RunningHubPageAdapter
 
 
@@ -63,16 +68,32 @@ class FakeChatGptPage:
 
 
 class FakeRunningHubPage:
-    def __init__(self, task_id: str = "task-123") -> None:
+    def __init__(
+        self,
+        task_id: str = "task-123",
+        task_status: str = "done",
+        downloadable_path: Path | None = None,
+    ) -> None:
         self.task_id = task_id
         self.goto_calls: list[tuple[str, str]] = []
+        self.task_status = task_status
+        self.downloadable_path = downloadable_path
+        if self.downloadable_path is not None:
+            self.downloadable_path.parent.mkdir(parents=True, exist_ok=True)
+            self.downloadable_path.write_bytes(b"video-bytes")
         self.locators = {
             "#video-upload": FakeLocator(count=1),
             "#image-upload": FakeLocator(count=1),
             "input[name='width']": FakeLocator(count=1, visible=True),
             "input[name='height']": FakeLocator(count=1, visible=True),
             "button[data-testid='submit-workflow']": FakeLocator(count=1, visible=True),
+            "button[data-testid='download-render']": FakeLocator(count=1, visible=True),
             "[data-testid='task-id']": FakeLocator(count=1, visible=True, text=task_id),
+            "[data-testid='task-status']": FakeLocator(
+                count=1,
+                visible=True,
+                text=task_status,
+            ),
         }
 
     def goto(self, url: str, wait_until: str) -> None:
@@ -80,6 +101,29 @@ class FakeRunningHubPage:
 
     def locator(self, selector: str) -> FakeLocator:
         return self.locators.get(selector, FakeLocator())
+
+    def expect_download(self) -> object:
+        if self.downloadable_path is None:
+            raise RuntimeError("downloadable_path not configured")
+        page = self
+
+        class FakeDownload:
+            def save_as(self, target_path: str) -> None:
+                target = Path(target_path)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(page.downloadable_path.read_bytes())
+
+        class FakeExpectDownload:
+            def __init__(self) -> None:
+                self.value = FakeDownload()
+
+            def __enter__(self) -> "FakeExpectDownload":
+                return self
+
+            def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+                return False
+
+        return FakeExpectDownload()
 
 
 class FakeChatGptAdapter:
@@ -96,16 +140,52 @@ class FakeChatGptAdapter:
 
 
 class FakeRunningHubAdapter:
-    def __init__(self) -> None:
-        self.calls = 0
+    def __init__(
+        self,
+        *,
+        submit_result: dict[str, object] | None = None,
+        poll_result: dict[str, object] | None = None,
+        download_result: dict[str, object] | None = None,
+    ) -> None:
+        self.submit_calls = 0
+        self.poll_calls = 0
+        self.download_calls = 0
+        self._submit_result = submit_result or {
+            "status": "submitted",
+            "task_id": "task-123",
+            "pause_reason": None,
+        }
+        self._poll_result = poll_result or {
+            "status": "done",
+            "task_id": "task-123",
+            "pause_reason": None,
+        }
+        self._download_result = download_result or {
+            "status": "downloaded",
+            "output_path": None,
+            "pause_reason": None,
+        }
 
     def submit_render_job(self, page: object, request: object) -> object:
-        self.calls += 1
-        return type(
-            "Result",
-            (),
-            {"status": "submitted", "task_id": "task-123", "pause_reason": None},
-        )()
+        del page, request
+        self.submit_calls += 1
+        return type("Result", (), self._submit_result)()
+
+    def poll_render_status(self, page: object, task_id: str) -> object:
+        del page, task_id
+        self.poll_calls += 1
+        return type("Result", (), self._poll_result)()
+
+    def download_render_output(self, page: object, output_path: Path) -> object:
+        del page
+        self.download_calls += 1
+        if self._download_result["status"] == "downloaded":
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"video-bytes")
+        payload = dict(self._download_result)
+        if payload.get("output_path") is None and payload["status"] == "downloaded":
+            payload["output_path"] = output_path
+        return type("Result", (), payload)()
 
 
 class FakePausedChatGptAdapter:
@@ -147,6 +227,7 @@ def test_run_single_clip_live_flow_returns_state_path_and_task_id(
 def test_run_single_clip_live_flow_builds_adapter_requests_for_real_adapters(
     tmp_path: Path,
 ) -> None:
+    downloadable_path = tmp_path / "work" / "downloads" / "rendered.mp4"
     result = run_single_clip_live_flow(
         request=LiveClipRequest(
             clip_id="clip-0001",
@@ -157,7 +238,7 @@ def test_run_single_clip_live_flow_builds_adapter_requests_for_real_adapters(
             rendered_output_path=tmp_path / "output" / "rendered" / "clip-0001.mp4",
         ),
         chatgpt_page=FakeChatGptPage(),
-        runninghub_page=FakeRunningHubPage(),
+        runninghub_page=FakeRunningHubPage(downloadable_path=downloadable_path),
         chatgpt_adapter=ChatGptPageAdapter(start_url="https://chatgpt.com/g/test"),
         runninghub_adapter=RunningHubPageAdapter(workflow_url="https://example.com/workflow"),
     )
@@ -188,7 +269,88 @@ def test_run_single_clip_live_flow_stops_before_runninghub_when_chatgpt_pauses(
 
     saved_state = load_live_state(state_path)
 
-    assert runninghub_adapter.calls == 0
+    assert runninghub_adapter.submit_calls == 0
     assert result["task_id"] == ""
     assert saved_state.step == "paused"
     assert saved_state.pause_reason == PauseReason.LOGIN_REQUIRED
+
+
+def test_run_single_clip_live_flow_polls_and_downloads_after_submit(
+    tmp_path: Path,
+) -> None:
+    rendered_output_path = tmp_path / "output" / "rendered" / "clip-0001.mp4"
+    runninghub_adapter = FakeRunningHubAdapter(
+        submit_result={"status": "submitted", "task_id": "task-123", "pause_reason": None},
+        poll_result={"status": "done", "task_id": "task-123", "pause_reason": None},
+        download_result={
+            "status": "downloaded",
+            "output_path": rendered_output_path,
+            "pause_reason": None,
+        },
+    )
+
+    result = run_single_clip_live_flow(
+        request=LiveClipRequest(
+            clip_id="clip-0001",
+            clip_path=tmp_path / "work" / "clips" / "clip-0001.mp4",
+            frame_path=tmp_path / "work" / "frames" / "clip-0001.png",
+            prompt="replace actor_a with jett",
+            state_path=tmp_path / "work" / "live_state" / "clip-0001.json",
+            rendered_output_path=rendered_output_path,
+        ),
+        chatgpt_page=object(),
+        runninghub_page=object(),
+        chatgpt_adapter=FakeChatGptAdapter(),
+        runninghub_adapter=runninghub_adapter,
+    )
+
+    assert runninghub_adapter.submit_calls == 1
+    assert runninghub_adapter.poll_calls == 1
+    assert runninghub_adapter.download_calls == 1
+    assert result["task_id"] == "task-123"
+
+
+def test_run_single_clip_live_flow_resumes_polling_without_resubmitting(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "work" / "live_state" / "clip-0001.json"
+    save_live_state(
+        state_path,
+        LiveClipState(
+            clip_id="clip-0001",
+            step="runninghub_submitted",
+            reference_image_path=tmp_path / "work" / "chatgpt_refs" / "clip-0001.png",
+            rendered_output_path=tmp_path / "output" / "rendered" / "clip-0001.mp4",
+            runninghub_task_id="task-123",
+            pause_reason=None,
+            last_error=None,
+            last_screenshot_path=None,
+        ),
+    )
+    runninghub_adapter = FakeRunningHubAdapter(
+        submit_result={"status": "submitted", "task_id": "task-999", "pause_reason": None},
+        poll_result={"status": "done", "task_id": "task-123", "pause_reason": None},
+        download_result={
+            "status": "downloaded",
+            "output_path": tmp_path / "output" / "rendered" / "clip-0001.mp4",
+            "pause_reason": None,
+        },
+    )
+
+    run_single_clip_live_flow(
+        request=LiveClipRequest(
+            clip_id="clip-0001",
+            clip_path=tmp_path / "work" / "clips" / "clip-0001.mp4",
+            frame_path=tmp_path / "work" / "frames" / "clip-0001.png",
+            prompt="replace actor_a with jett",
+            state_path=state_path,
+            rendered_output_path=tmp_path / "output" / "rendered" / "clip-0001.mp4",
+        ),
+        chatgpt_page=object(),
+        runninghub_page=object(),
+        chatgpt_adapter=FakeChatGptAdapter(),
+        runninghub_adapter=runninghub_adapter,
+    )
+
+    assert runninghub_adapter.submit_calls == 0
+    assert runninghub_adapter.poll_calls == 1
