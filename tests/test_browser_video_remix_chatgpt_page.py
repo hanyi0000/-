@@ -11,6 +11,7 @@ class FakeLocator:
         self._visible = visible
         self.input_files: list[str] = []
         self.filled_values: list[str] = []
+        self.clicks = 0
 
     def count(self) -> int:
         return self._count
@@ -23,6 +24,9 @@ class FakeLocator:
 
     def fill(self, value: str) -> None:
         self.filled_values.append(value)
+
+    def click(self) -> None:
+        self.clicks += 1
 
 
 class StrictModeLocator(FakeLocator):
@@ -42,13 +46,30 @@ class FakeChatGptPage:
         login_gate_visible: bool = False,
         has_file_input: bool = True,
         has_prompt_textarea: bool = True,
+        has_upload_photos_input: bool = True,
+        has_contenteditable_prompt: bool = False,
+        url: str = "https://chatgpt.com/g/test",
+        html: str = "",
     ) -> None:
         self.goto_calls: list[tuple[str, str]] = []
+        self.url = url
+        self.html = html
         self.locators: dict[str, FakeLocator] = {}
         if has_file_input:
             self.locators["#upload-files"] = FakeLocator(count=1)
+        if has_upload_photos_input:
+            self.locators["#upload-photos"] = FakeLocator(count=1)
         if has_prompt_textarea:
-            self.locators["textarea[name='prompt-textarea']"] = FakeLocator(count=1)
+            self.locators["textarea[name='prompt-textarea']"] = FakeLocator(
+                count=1,
+                visible=True,
+            )
+        if has_contenteditable_prompt:
+            self.locators["#prompt-textarea[contenteditable='true']"] = FakeLocator(
+                count=1,
+                visible=True,
+            )
+        self.locators["[data-testid='send-button']"] = FakeLocator(count=1, visible=True)
         self.role_locators = {
             ("button", "登录"): FakeLocator(
                 count=1 if login_button_visible else 0,
@@ -64,6 +85,7 @@ class FakeChatGptPage:
 
     def goto(self, url: str, wait_until: str) -> None:
         self.goto_calls.append((url, wait_until))
+        self.url = url
 
     def locator(self, selector: str) -> FakeLocator:
         return self.locators.get(selector, FakeLocator())
@@ -73,6 +95,9 @@ class FakeChatGptPage:
 
     def get_by_text(self, text: str) -> FakeLocator:
         return self.text_locators.get(text, FakeLocator())
+
+    def content(self) -> str:
+        return self.html
 
 
 def test_chatgpt_adapter_pauses_when_login_is_required() -> None:
@@ -113,6 +138,18 @@ def test_chatgpt_adapter_ensure_session_opens_start_url() -> None:
     assert result.pause_reason is None
 
 
+def test_chatgpt_adapter_pauses_when_cloudflare_challenge_is_present() -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    page = FakeChatGptPage(
+        html='<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script>',
+    )
+
+    result = adapter.ensure_session(page)
+
+    assert result.status == "paused"
+    assert result.pause_reason == PauseReason.CAPTCHA_REQUIRED
+
+
 def test_chatgpt_adapter_submit_reference_generation_uploads_frame_and_prompt() -> None:
     adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
     page = FakeChatGptPage()
@@ -125,18 +162,41 @@ def test_chatgpt_adapter_submit_reference_generation_uploads_frame_and_prompt() 
 
     result = adapter.submit_reference_generation(page=page, request=request)
 
-    assert page.locators["#upload-files"].input_files == ["work/frames/clip-0001.png"]
+    assert page.locators["#upload-photos"].input_files == ["work/frames/clip-0001.png"]
     assert page.locators["textarea[name='prompt-textarea']"].filled_values == [
         "replace actor_a with jett"
     ]
+    assert page.locators["[data-testid='send-button']"].clicks == 1
     assert result.status == "submitted"
     assert result.output_path == request.output_path
 
 
-def test_chatgpt_adapter_pauses_when_prompt_textarea_is_missing() -> None:
+def test_chatgpt_adapter_uses_contenteditable_prompt_when_textarea_is_missing() -> None:
     adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
     result = adapter.submit_reference_generation(
-        page=FakeChatGptPage(has_prompt_textarea=False),
+        page=FakeChatGptPage(
+            has_prompt_textarea=False,
+            has_contenteditable_prompt=True,
+        ),
+        request=ChatGptReferenceRequest(
+            clip_id="clip-0001",
+            frame_path=Path("work/frames/clip-0001.png"),
+            output_path=Path("work/chatgpt_refs/clip-0001.png"),
+            prompt="replace actor_a with jett",
+        ),
+    )
+
+    assert result.status == "submitted"
+    assert result.pause_reason is None
+
+
+def test_chatgpt_adapter_pauses_when_all_prompt_inputs_are_missing() -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    result = adapter.submit_reference_generation(
+        page=FakeChatGptPage(
+            has_prompt_textarea=False,
+            has_contenteditable_prompt=False,
+        ),
         request=ChatGptReferenceRequest(
             clip_id="clip-0001",
             frame_path=Path("work/frames/clip-0001.png"),

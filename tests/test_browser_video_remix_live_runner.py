@@ -12,6 +12,7 @@ class FakeLocator:
         self._visible = visible
         self.input_files: list[str] = []
         self.filled_values: list[str] = []
+        self.clicks = 0
 
     def count(self) -> int:
         return self._count
@@ -25,13 +26,18 @@ class FakeLocator:
     def fill(self, value: str) -> None:
         self.filled_values.append(value)
 
+    def click(self) -> None:
+        self.clicks += 1
+
 
 class FakeChatGptPage:
     def __init__(self) -> None:
         self.goto_calls: list[tuple[str, str]] = []
         self.locators = {
             "#upload-files": FakeLocator(count=1),
-            "textarea[name='prompt-textarea']": FakeLocator(count=1),
+            "#upload-photos": FakeLocator(count=1),
+            "textarea[name='prompt-textarea']": FakeLocator(count=1, visible=True),
+            "[data-testid='send-button']": FakeLocator(count=1, visible=True),
         }
 
     def goto(self, url: str, wait_until: str) -> None:

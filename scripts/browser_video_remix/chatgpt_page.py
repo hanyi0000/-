@@ -6,8 +6,12 @@ from .playwright_driver import capture_page_snapshot
 
 
 class ChatGptPageAdapter:
-    FILE_INPUT_SELECTOR = "#upload-files"
-    PROMPT_TEXTAREA_SELECTOR = "textarea[name='prompt-textarea']"
+    FILE_INPUT_SELECTORS = ("#upload-photos", "#upload-files")
+    PROMPT_INPUT_SELECTORS = (
+        "textarea[name='prompt-textarea']",
+        "#prompt-textarea[contenteditable='true']",
+    )
+    SEND_BUTTON_SELECTOR = "[data-testid='send-button']"
     LOGIN_BUTTON_TEXTS = ("\u767b\u5f55", "Log in")
     LOGIN_REQUIRED_TEXT = (
         "\u767b\u5f55\u4ee5\u83b7\u53d6\u57fa\u4e8e\u5df2\u4fdd\u5b58\u804a\u5929\u7684"
@@ -19,6 +23,12 @@ class ChatGptPageAdapter:
 
     def ensure_session(self, page: object) -> AdapterResult:
         page.goto(self.start_url, wait_until="domcontentloaded")
+        if self._is_challenge_page(page):
+            return AdapterResult(
+                status="paused",
+                output_path=None,
+                pause_reason=PauseReason.CAPTCHA_REQUIRED,
+            )
         if self._is_login_required(page):
             return AdapterResult(
                 status="paused",
@@ -40,9 +50,18 @@ class ChatGptPageAdapter:
         if session_result.pause_reason is not None:
             return session_result
 
-        file_input = self._find_required_locator(page, self.FILE_INPUT_SELECTOR)
-        prompt_input = self._find_required_locator(page, self.PROMPT_TEXTAREA_SELECTOR)
-        if file_input is None or prompt_input is None:
+        file_input = self._find_first_available_locator(
+            page,
+            self.FILE_INPUT_SELECTORS,
+            require_visible=False,
+        )
+        prompt_input = self._find_first_available_locator(
+            page,
+            self.PROMPT_INPUT_SELECTORS,
+            require_visible=True,
+        )
+        send_button = self._find_required_locator(page, self.SEND_BUTTON_SELECTOR)
+        if file_input is None or prompt_input is None or send_button is None:
             return AdapterResult(
                 status="paused",
                 output_path=None,
@@ -51,6 +70,7 @@ class ChatGptPageAdapter:
 
         file_input.set_input_files(request.frame_path.as_posix())
         prompt_input.fill(request.prompt)
+        send_button.click()
         return AdapterResult(
             status="submitted",
             output_path=request.output_path,
@@ -81,6 +101,16 @@ class ChatGptPageAdapter:
         login_gate = self._get_by_text(page, self.LOGIN_REQUIRED_TEXT)
         return login_gate is not None and self._locator_is_visible(login_gate)
 
+    def _is_challenge_page(self, page: object) -> bool:
+        current_url = str(getattr(page, "url", ""))
+        if "__cf_chl_rt_tk=" in current_url:
+            return True
+        content_getter = getattr(page, "content", None)
+        if not callable(content_getter):
+            return False
+        html = content_getter()
+        return "/cdn-cgi/challenge-platform/" in html
+
     def _find_required_locator(self, page: object, selector: str) -> object | None:
         locator_factory = getattr(page, "locator", None)
         if not callable(locator_factory):
@@ -89,6 +119,22 @@ class ChatGptPageAdapter:
         if self._locator_count(locator) <= 0:
             return None
         return locator
+
+    def _find_first_available_locator(
+        self,
+        page: object,
+        selectors: tuple[str, ...],
+        require_visible: bool,
+    ) -> object | None:
+        for selector in selectors:
+            locator = self._find_required_locator(page, selector)
+            if locator is None:
+                continue
+            if self._locator_is_visible(locator):
+                return locator
+            if not require_visible:
+                return locator
+        return None
 
     def _get_by_role(self, page: object, role: str, name: str) -> object | None:
         getter = getattr(page, "get_by_role", None)
