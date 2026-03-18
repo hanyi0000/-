@@ -4,12 +4,19 @@ split:
   mode: fixed_duration
   seconds: 2
 
+chatgpt:
+  start_url: https://chatgpt.com/g/test
+  prompt_timeout_ms: 90000
+
 browser:
   profile_dir: browser/profile
+  downloads_dir: work/downloads
+  default_timeout_ms: 15000
   headless: false
 
 runninghub:
   workflow_url: https://example.com/workflow
+  poll_interval_seconds: 5
 
 actors:
   actor_a:
