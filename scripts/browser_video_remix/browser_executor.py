@@ -2,6 +2,8 @@ from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
 
+from .live_state import PauseReason
+
 
 @dataclass(frozen=True)
 class ClipExecutionRequest:
@@ -19,6 +21,20 @@ class ChatGptReferenceRequest:
     frame_path: Path
     output_path: Path
     prompt: str
+
+
+@dataclass(frozen=True)
+class AdapterResult:
+    status: str
+    output_path: Path | None
+    pause_reason: PauseReason | None
+
+
+@dataclass(frozen=True)
+class RunningHubSubmitResult:
+    status: str
+    task_id: str | None
+    pause_reason: PauseReason | None
 
 
 class RunningHubTaskStatus(str, Enum):
