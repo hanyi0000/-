@@ -48,6 +48,27 @@ def run_single_clip_live_flow(
         chatgpt_page,
         chatgpt_request,
     )
+    if reference_result.pause_reason is not None:
+        save_live_state(
+            request.state_path,
+            LiveClipState(
+                clip_id=request.clip_id,
+                step="paused",
+                reference_image_path=reference_result.output_path,
+                rendered_output_path=request.rendered_output_path,
+                runninghub_task_id=None,
+                pause_reason=reference_result.pause_reason,
+                last_error=None,
+                last_screenshot_path=None,
+            ),
+        )
+        return {
+            "clip_id": request.clip_id,
+            "task_id": "",
+            "state_path": request.state_path.as_posix(),
+            "reference_image_path": "",
+        }
+
     runninghub_result = runninghub_adapter.submit_render_job(
         runninghub_page,
         runninghub_request,
@@ -69,7 +90,11 @@ def run_single_clip_live_flow(
 
     return {
         "clip_id": request.clip_id,
-        "task_id": str(runninghub_result.task_id),
+        "task_id": "" if runninghub_result.task_id is None else str(runninghub_result.task_id),
         "state_path": request.state_path.as_posix(),
-        "reference_image_path": reference_result.output_path.as_posix(),
+        "reference_image_path": (
+            ""
+            if reference_result.output_path is None
+            else reference_result.output_path.as_posix()
+        ),
     }
