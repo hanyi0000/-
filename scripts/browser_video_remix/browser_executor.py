@@ -58,6 +58,15 @@ class RunningHubTaskStatus(str, Enum):
     FAILED = "failed"
 
 
+def _build_chatgpt_edit_prompt(prompt: str) -> str:
+    return (
+        "Edit the attached image. "
+        f"{prompt.strip()} "
+        "Keep the composition, pose, camera angle, lighting, and background unchanged unless the edit requires otherwise. "
+        "Return only the edited image."
+    )
+
+
 def build_runninghub_payload(request: ClipExecutionRequest) -> dict[str, str]:
     return {
         "clip_id": request.clip_id,
@@ -78,7 +87,7 @@ def build_chatgpt_reference_job(
         clip_id=clip_id,
         frame_path=frame_path,
         output_path=output_path,
-        prompt=prompt,
+        prompt=_build_chatgpt_edit_prompt(prompt),
     )
 
 

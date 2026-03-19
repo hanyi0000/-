@@ -6,12 +6,21 @@ from scripts.browser_video_remix.live_state import PauseReason
 
 
 class FakeLocator:
-    def __init__(self, *, count: int = 0, visible: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        count: int = 0,
+        visible: bool = False,
+        screenshot_bytes: bytes | None = None,
+    ) -> None:
         self._count = count
         self._visible = visible
         self.input_files: list[str] = []
         self.filled_values: list[str] = []
         self.clicks = 0
+        self.dispatch_events: list[tuple[str, object | None]] = []
+        self.screenshot_bytes = screenshot_bytes
+        self.screenshot_paths: list[str] = []
 
     def count(self) -> int:
         return self._count
@@ -28,6 +37,17 @@ class FakeLocator:
     def click(self) -> None:
         self.clicks += 1
 
+    def dispatch_event(self, event_name: str, event_init: object | None = None) -> None:
+        self.dispatch_events.append((event_name, event_init))
+
+    def screenshot(self, path: str) -> None:
+        self.screenshot_paths.append(path)
+        if self.screenshot_bytes is None:
+            raise RuntimeError("screenshot bytes not configured")
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(self.screenshot_bytes)
+
 
 class StrictModeLocator(FakeLocator):
     def __init__(self) -> None:
@@ -36,6 +56,23 @@ class StrictModeLocator(FakeLocator):
 
     def is_visible(self) -> bool:
         raise RuntimeError("strict mode violation")
+
+
+class FakeResponse:
+    def __init__(self, url: str, *, ok: bool = True) -> None:
+        self.url = url
+        self.ok = ok
+
+
+class FakeExpectResponse:
+    def __init__(self, response: FakeResponse | None) -> None:
+        self.value = response
+
+    def __enter__(self) -> "FakeExpectResponse":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+        return False
 
 
 class FakeChatGptPage:
@@ -49,6 +86,11 @@ class FakeChatGptPage:
         has_upload_photos_input: bool = True,
         has_contenteditable_prompt: bool = False,
         attachment_visible: bool = False,
+        file_input_upload_success: bool = False,
+        drop_upload_success: bool = False,
+        has_generated_image: bool = False,
+        has_generated_viewer_image: bool = False,
+        generated_image_bytes: bytes = b"generated-image-bytes",
         url: str = "https://chatgpt.com/g/test",
         html: str = "",
     ) -> None:
@@ -56,7 +98,27 @@ class FakeChatGptPage:
         self.url = url
         self.html = html
         self.attachment_visible = attachment_visible
+        self.has_generated_image = has_generated_image
+        self.has_generated_viewer_image = has_generated_viewer_image
+        self.evaluate_handle_calls: list[object] = []
+        self.expect_response_calls = 0
+        self.wait_for_function_calls: list[tuple[str, object | None, object | None]] = []
         self.locators: dict[str, FakeLocator] = {}
+        self.expected_responses: list[FakeResponse] = []
+        if file_input_upload_success:
+            self.expected_responses.extend(
+                [
+                    FakeResponse("https://chatgpt.com/backend-api/files"),
+                    FakeResponse("https://chatgpt.com/backend-api/files/process_upload_stream"),
+                ]
+            )
+        if drop_upload_success:
+            self.expected_responses.extend(
+                [
+                    FakeResponse("https://chatgpt.com/backend-api/files"),
+                    FakeResponse("https://chatgpt.com/backend-api/files/process_upload_stream"),
+                ]
+            )
         if has_file_input:
             self.locators["#upload-files"] = FakeLocator(count=1)
         if has_upload_photos_input:
@@ -70,6 +132,18 @@ class FakeChatGptPage:
             self.locators["#prompt-textarea[contenteditable='true']"] = FakeLocator(
                 count=1,
                 visible=True,
+            )
+        if has_generated_image:
+            self.locators["[data-message-author-role='assistant'] img"] = FakeLocator(
+                count=1,
+                visible=True,
+                screenshot_bytes=generated_image_bytes,
+            )
+        if has_generated_viewer_image:
+            self.locators["img[alt*='Generated image' i]"] = FakeLocator(
+                count=1,
+                visible=True,
+                screenshot_bytes=generated_image_bytes,
             )
         self.locators["[data-testid='send-button']"] = FakeLocator(count=1, visible=True)
         self.role_locators = {
@@ -106,6 +180,26 @@ class FakeChatGptPage:
 
     def content(self) -> str:
         return self.html
+
+    def evaluate_handle(self, script: str, payload: object) -> dict[str, object]:
+        self.evaluate_handle_calls.append((script, payload))
+        return {"payload": payload}
+
+    def expect_response(self, predicate: object) -> FakeExpectResponse:
+        self.expect_response_calls += 1
+        response = self.expected_responses.pop(0) if self.expected_responses else None
+        return FakeExpectResponse(response)
+
+    def wait_for_function(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+        timeout: object | None = None,
+    ) -> None:
+        self.wait_for_function_calls.append((expression, arg, timeout))
+        if not self.has_generated_image and not self.has_generated_viewer_image:
+            raise TimeoutError("generated image not ready")
 
 
 def test_chatgpt_adapter_pauses_when_login_is_required() -> None:
@@ -147,7 +241,7 @@ def test_chatgpt_adapter_ensure_session_opens_start_url() -> None:
 
 
 def test_chatgpt_adapter_pauses_when_cloudflare_challenge_is_present() -> None:
-    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/?__cf_chl_rt_tk=example")
     page = FakeChatGptPage(
         html='<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script>',
     )
@@ -158,9 +252,21 @@ def test_chatgpt_adapter_pauses_when_cloudflare_challenge_is_present() -> None:
     assert result.pause_reason == PauseReason.CAPTCHA_REQUIRED
 
 
+def test_chatgpt_adapter_does_not_treat_normal_shell_as_challenge() -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    page = FakeChatGptPage(
+        html='<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script>',
+    )
+
+    result = adapter.ensure_session(page)
+
+    assert result.status == "ready"
+    assert result.pause_reason is None
+
+
 def test_chatgpt_adapter_submit_reference_generation_uploads_frame_and_prompt() -> None:
     adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
-    page = FakeChatGptPage(attachment_visible=True)
+    page = FakeChatGptPage(attachment_visible=True, has_generated_image=True)
     request = ChatGptReferenceRequest(
         clip_id="clip-0001",
         frame_path=Path("work/frames/clip-0001.png"),
@@ -170,7 +276,7 @@ def test_chatgpt_adapter_submit_reference_generation_uploads_frame_and_prompt() 
 
     result = adapter.submit_reference_generation(page=page, request=request)
 
-    assert page.locators["#upload-photos"].input_files == ["work/frames/clip-0001.png"]
+    assert page.locators["#upload-files"].input_files == ["work/frames/clip-0001.png"]
     assert page.locators["textarea[name='prompt-textarea']"].filled_values == [
         "replace actor_a with jett"
     ]
@@ -186,6 +292,7 @@ def test_chatgpt_adapter_uses_contenteditable_prompt_when_textarea_is_missing() 
             has_prompt_textarea=False,
             has_contenteditable_prompt=True,
             attachment_visible=True,
+            has_generated_image=True,
         ),
         request=ChatGptReferenceRequest(
             clip_id="clip-0001",
@@ -212,6 +319,184 @@ def test_chatgpt_adapter_pauses_when_attachment_is_not_confirmed() -> None:
     result = adapter.submit_reference_generation(page=page, request=request)
 
     assert page.locators["[data-testid='send-button']"].clicks == 0
+    assert result.status == "paused"
+    assert result.pause_reason == PauseReason.MANUAL_CONFIRMATION_REQUIRED
+
+
+def test_chatgpt_adapter_submits_when_drag_drop_upload_completes(tmp_path: Path) -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    page = FakeChatGptPage(
+        has_file_input=False,
+        has_upload_photos_input=False,
+        has_prompt_textarea=False,
+        has_contenteditable_prompt=True,
+        attachment_visible=False,
+        drop_upload_success=True,
+        has_generated_image=True,
+    )
+    frame_path = tmp_path / "chatgpt-edge-proxy-smoke.png"
+    frame_path.write_bytes(b"fake-png")
+    request = ChatGptReferenceRequest(
+        clip_id="clip-0001",
+        frame_path=frame_path,
+        output_path=Path("work/chatgpt_refs/clip-0001.png"),
+        prompt="replace actor_a with jett",
+    )
+
+    result = adapter.submit_reference_generation(page=page, request=request)
+
+    assert [
+        event_name
+        for event_name, _ in page.locators["#prompt-textarea[contenteditable='true']"].dispatch_events
+    ] == ["dragenter", "dragover", "drop"]
+    assert page.expect_response_calls == 2
+    assert page.locators["[data-testid='send-button']"].clicks == 1
+    assert result.status == "submitted"
+
+
+def test_chatgpt_adapter_submits_when_file_input_upload_completes() -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    page = FakeChatGptPage(
+        attachment_visible=False,
+        file_input_upload_success=True,
+        has_generated_image=True,
+    )
+    request = ChatGptReferenceRequest(
+        clip_id="clip-0001",
+        frame_path=Path("work/frames/chatgpt-edge-proxy-smoke.png"),
+        output_path=Path("work/chatgpt_refs/clip-0001.png"),
+        prompt="replace actor_a with jett",
+    )
+
+    result = adapter.submit_reference_generation(page=page, request=request)
+
+    assert page.expect_response_calls == 2
+    assert page.locators["textarea[name='prompt-textarea']"].dispatch_events == []
+    assert page.locators["[data-testid='send-button']"].clicks == 1
+    assert result.status == "submitted"
+
+
+def test_chatgpt_adapter_prefers_upload_files_input_before_upload_photos() -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    page = FakeChatGptPage(
+        attachment_visible=False,
+        has_generated_image=True,
+    )
+    attempted_inputs: list[object] = []
+
+    def fake_upload(current_page: object, file_input: object, frame_path: Path) -> bool:
+        del current_page, frame_path
+        attempted_inputs.append(file_input)
+        return file_input is page.locators["#upload-files"]
+
+    adapter._upload_via_file_input = fake_upload  # type: ignore[method-assign]
+    adapter._upload_via_drag_drop = lambda *args: False  # type: ignore[method-assign]
+    adapter._is_attachment_ready = lambda *args: False  # type: ignore[method-assign]
+
+    result = adapter.submit_reference_generation(
+        page=page,
+        request=ChatGptReferenceRequest(
+            clip_id="clip-0001",
+            frame_path=Path("work/frames/clip-0001.png"),
+            output_path=Path("work/chatgpt_refs/clip-0001.png"),
+            prompt="replace actor_a with jett",
+        ),
+    )
+
+    assert attempted_inputs == [page.locators["#upload-files"]]
+    assert page.locators["[data-testid='send-button']"].clicks == 1
+    assert result.status == "submitted"
+
+
+def test_chatgpt_adapter_create_file_matcher_excludes_process_upload_stream() -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+
+    assert adapter._is_create_file_response(
+        FakeResponse("https://chatgpt.com/backend-api/files")
+    ) is True
+    assert adapter._is_create_file_response(
+        FakeResponse("https://chatgpt.com/backend-api/files/process_upload_stream")
+    ) is False
+    assert adapter._is_process_upload_response(
+        FakeResponse("https://chatgpt.com/backend-api/files/process_upload_stream")
+    ) is True
+
+
+def test_chatgpt_adapter_saves_generated_reference_image_to_output_path(
+    tmp_path: Path,
+) -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    output_path = tmp_path / "work" / "chatgpt_refs" / "clip-0001.png"
+    page = FakeChatGptPage(
+        attachment_visible=True,
+        has_generated_image=True,
+        generated_image_bytes=b"generated-reference-image",
+    )
+    request = ChatGptReferenceRequest(
+        clip_id="clip-0001",
+        frame_path=Path("work/frames/chatgpt-edge-proxy-smoke.png"),
+        output_path=output_path,
+        prompt="replace actor_a with jett",
+    )
+
+    result = adapter.submit_reference_generation(page=page, request=request)
+
+    assert len(page.wait_for_function_calls) == 1
+    assert (
+        page.locators["[data-message-author-role='assistant'] img"].screenshot_paths
+        == [output_path.as_posix()]
+    )
+    assert output_path.read_bytes() == b"generated-reference-image"
+    assert result.status == "submitted"
+    assert result.output_path == output_path
+
+
+def test_chatgpt_adapter_saves_generated_image_from_dedicated_viewer_ui(
+    tmp_path: Path,
+) -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    output_path = tmp_path / "work" / "chatgpt_refs" / "clip-0001.png"
+    page = FakeChatGptPage(
+        attachment_visible=True,
+        has_generated_viewer_image=True,
+        generated_image_bytes=b"generated-reference-image",
+    )
+    request = ChatGptReferenceRequest(
+        clip_id="clip-0001",
+        frame_path=Path("work/frames/chatgpt-edge-proxy-smoke.png"),
+        output_path=output_path,
+        prompt="replace actor_a with jett",
+    )
+
+    result = adapter.submit_reference_generation(page=page, request=request)
+
+    assert len(page.wait_for_function_calls) == 1
+    assert page.locators["img[alt*='Generated image' i]"].screenshot_paths == [
+        output_path.as_posix()
+    ]
+    assert output_path.read_bytes() == b"generated-reference-image"
+    assert result.status == "submitted"
+    assert result.output_path == output_path
+
+
+def test_chatgpt_adapter_pauses_when_generated_reference_image_never_appears(
+    tmp_path: Path,
+) -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    output_path = tmp_path / "work" / "chatgpt_refs" / "clip-0001.png"
+    page = FakeChatGptPage(attachment_visible=True)
+    request = ChatGptReferenceRequest(
+        clip_id="clip-0001",
+        frame_path=Path("work/frames/chatgpt-edge-proxy-smoke.png"),
+        output_path=output_path,
+        prompt="replace actor_a with jett",
+    )
+
+    result = adapter.submit_reference_generation(page=page, request=request)
+
+    assert len(page.wait_for_function_calls) == 1
+    assert page.locators["[data-testid='send-button']"].clicks == 1
+    assert output_path.exists() is False
     assert result.status == "paused"
     assert result.pause_reason == PauseReason.MANUAL_CONFIRMATION_REQUIRED
 
