@@ -13,13 +13,21 @@ from scripts.browser_video_remix.runninghub_page import RunningHubPageAdapter
 
 
 class FakeLocator:
-    def __init__(self, *, count: int = 0, visible: bool = False, text: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        count: int = 0,
+        visible: bool = False,
+        text: str = "",
+        screenshot_bytes: bytes | None = None,
+    ) -> None:
         self._count = count
         self._visible = visible
         self._text = text
         self.input_files: list[str] = []
         self.filled_values: list[str] = []
         self.clicks = 0
+        self.screenshot_bytes = screenshot_bytes
 
     def count(self) -> int:
         return self._count
@@ -42,6 +50,13 @@ class FakeLocator:
     def text_content(self) -> str:
         return self._text
 
+    def screenshot(self, path: str) -> None:
+        if self.screenshot_bytes is None:
+            raise RuntimeError("screenshot bytes not configured")
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(self.screenshot_bytes)
+
 
 class FakeChatGptPage:
     def __init__(self) -> None:
@@ -50,6 +65,11 @@ class FakeChatGptPage:
             "#upload-files": FakeLocator(count=1),
             "#upload-photos": FakeLocator(count=1),
             "textarea[name='prompt-textarea']": FakeLocator(count=1, visible=True),
+            "[data-message-author-role='assistant'] img": FakeLocator(
+                count=1,
+                visible=True,
+                screenshot_bytes=b"generated-reference-image",
+            ),
             "[data-testid='send-button']": FakeLocator(count=1, visible=True),
         }
 
@@ -66,6 +86,14 @@ class FakeChatGptPage:
         if text.endswith(".png"):
             return FakeLocator(count=1, visible=True)
         return FakeLocator()
+
+    def wait_for_function(
+        self,
+        expression: str,
+        arg: object | None = None,
+        timeout: object | None = None,
+    ) -> None:
+        del expression, arg, timeout
 
 
 class FakeRunningHubPage:
@@ -128,7 +156,12 @@ class FakeRunningHubPage:
 
 
 class FakeChatGptAdapter:
+    def __init__(self) -> None:
+        self.submit_calls = 0
+
     def submit_reference_generation(self, page: object, request: object) -> object:
+        del page, request
+        self.submit_calls += 1
         return type(
             "Result",
             (),
@@ -151,6 +184,8 @@ class FakeRunningHubAdapter:
         self.submit_calls = 0
         self.poll_calls = 0
         self.download_calls = 0
+        self.download_task_ids: list[str | None] = []
+        self.ensure_session_calls = 0
         self.snapshot_calls = 0
         self._submit_result = submit_result or {
             "status": "submitted",
@@ -168,6 +203,19 @@ class FakeRunningHubAdapter:
             "pause_reason": None,
         }
 
+    def ensure_session(self, page: object) -> object:
+        del page
+        self.ensure_session_calls += 1
+        return type(
+            "Result",
+            (),
+            {
+                "status": "ready",
+                "task_id": None,
+                "pause_reason": None,
+            },
+        )()
+
     def submit_render_job(self, page: object, request: object) -> object:
         del page, request
         self.submit_calls += 1
@@ -178,9 +226,15 @@ class FakeRunningHubAdapter:
         self.poll_calls += 1
         return type("Result", (), self._poll_result)()
 
-    def download_render_output(self, page: object, output_path: Path) -> object:
+    def download_render_output(
+        self,
+        page: object,
+        output_path: Path,
+        task_id: str | None = None,
+    ) -> object:
         del page
         self.download_calls += 1
+        self.download_task_ids.append(task_id)
         if self._download_result["status"] == "downloaded":
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"video-bytes")
@@ -325,6 +379,7 @@ def test_run_single_clip_live_flow_polls_and_downloads_after_submit(
     assert runninghub_adapter.submit_calls == 1
     assert runninghub_adapter.poll_calls == 1
     assert runninghub_adapter.download_calls == 1
+    assert runninghub_adapter.download_task_ids == ["task-123"]
     assert result["task_id"] == "task-123"
 
 
@@ -372,6 +427,54 @@ def test_run_single_clip_live_flow_resumes_polling_without_resubmitting(
 
     assert runninghub_adapter.submit_calls == 0
     assert runninghub_adapter.poll_calls == 1
+
+
+def test_run_single_clip_live_flow_reuses_existing_reference_image_on_resume(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "work" / "live_state" / "clip-0001.json"
+    reference_image_path = tmp_path / "work" / "chatgpt_refs" / "clip-0001.png"
+    reference_image_path.parent.mkdir(parents=True, exist_ok=True)
+    reference_image_path.write_bytes(b"reference-bytes")
+    save_live_state(
+        state_path,
+        LiveClipState(
+            clip_id="clip-0001",
+            step="runninghub_polling",
+            reference_image_path=reference_image_path,
+            rendered_output_path=tmp_path / "output" / "rendered" / "clip-0001.mp4",
+            runninghub_task_id="task-123",
+            pause_reason=None,
+            last_error=None,
+            last_screenshot_path=None,
+        ),
+    )
+    chatgpt_adapter = FakeChatGptAdapter()
+    runninghub_adapter = FakeRunningHubAdapter(
+        poll_result={"status": "running", "task_id": "task-123", "pause_reason": None},
+    )
+
+    result = run_single_clip_live_flow(
+        request=LiveClipRequest(
+            clip_id="clip-0001",
+            clip_path=tmp_path / "work" / "clips" / "clip-0001.mp4",
+            frame_path=tmp_path / "work" / "frames" / "clip-0001.png",
+            prompt="replace actor_a with jett",
+            state_path=state_path,
+            rendered_output_path=tmp_path / "output" / "rendered" / "clip-0001.mp4",
+        ),
+        chatgpt_page=object(),
+        runninghub_page=object(),
+        chatgpt_adapter=chatgpt_adapter,
+        runninghub_adapter=runninghub_adapter,
+    )
+
+    assert chatgpt_adapter.submit_calls == 0
+    assert runninghub_adapter.ensure_session_calls == 1
+    assert runninghub_adapter.submit_calls == 0
+    assert runninghub_adapter.poll_calls == 1
+    assert result["task_id"] == "task-123"
+    assert result["reference_image_path"] == reference_image_path.as_posix()
 
 
 def test_run_single_clip_live_flow_saves_runninghub_pause_artifacts(
