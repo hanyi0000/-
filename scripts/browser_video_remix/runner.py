@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from .paths import build_project_paths
+
 
 @dataclass(frozen=True)
 class BatchRunPlan:
@@ -13,8 +15,8 @@ class BatchRunPlan:
 class PrepareRunPlan:
     project_dir: Path
     clip_count: int
-    clips_dir: Path
-    frames_dir: Path
+    shots_dir: Path
+    keyframes_dir: Path
     manifest_path: Path
 
 
@@ -31,13 +33,13 @@ def plan_batch_run(
 
 
 def plan_prepare_run(project_dir: Path, clip_count: int) -> PrepareRunPlan:
-    work_dir = project_dir / "work"
+    paths = build_project_paths(project_dir)
     return PrepareRunPlan(
         project_dir=project_dir,
         clip_count=clip_count,
-        clips_dir=work_dir / "clips",
-        frames_dir=work_dir / "frames",
-        manifest_path=work_dir / "manifest.json",
+        shots_dir=paths.work_shots_dir,
+        keyframes_dir=paths.work_keyframes_dir,
+        manifest_path=paths.work_dir / "manifest.json",
     )
 
 

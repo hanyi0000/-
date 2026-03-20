@@ -11,4 +11,5 @@ def test_plan_prepare_run_returns_expected_artifact_paths(tmp_path: Path) -> Non
 
     assert result.clip_count == 3
     assert result.manifest_path.name == "manifest.json"
-    assert result.frames_dir.name == "frames"
+    assert result.shots_dir == tmp_path / "projects" / "demo" / "work" / "shots"
+    assert result.keyframes_dir == tmp_path / "projects" / "demo" / "work" / "keyframes"
