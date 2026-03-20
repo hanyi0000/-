@@ -31,7 +31,14 @@ class ChatGptPageAdapter:
         self.start_url = start_url
 
     def ensure_session(self, page: object) -> AdapterResult:
-        page.goto(self.start_url, wait_until="domcontentloaded")
+        try:
+            page.goto(self.start_url, wait_until="domcontentloaded")
+        except Exception:
+            return AdapterResult(
+                status="paused",
+                output_path=None,
+                pause_reason=PauseReason.MANUAL_CONFIRMATION_REQUIRED,
+            )
         if self._is_challenge_page(page):
             return AdapterResult(
                 status="paused",

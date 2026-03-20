@@ -205,6 +205,12 @@ class FakeChatGptPage:
             raise TimeoutError("generated image not ready")
 
 
+class TimeoutChatGptPage(FakeChatGptPage):
+    def goto(self, url: str, wait_until: str) -> None:
+        super().goto(url, wait_until)
+        raise TimeoutError("navigation timed out")
+
+
 def test_chatgpt_adapter_pauses_when_login_is_required() -> None:
     adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
     result = adapter.submit_reference_generation(
@@ -241,6 +247,17 @@ def test_chatgpt_adapter_ensure_session_opens_start_url() -> None:
     assert page.goto_calls == [("https://chatgpt.com/g/test", "domcontentloaded")]
     assert result.status == "ready"
     assert result.pause_reason is None
+
+
+def test_chatgpt_adapter_pauses_when_initial_navigation_times_out() -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    page = TimeoutChatGptPage()
+
+    result = adapter.ensure_session(page)
+
+    assert page.goto_calls == [("https://chatgpt.com/g/test", "domcontentloaded")]
+    assert result.status == "paused"
+    assert result.pause_reason == PauseReason.MANUAL_CONFIRMATION_REQUIRED
 
 
 def test_chatgpt_adapter_pauses_when_cloudflare_challenge_is_present() -> None:
