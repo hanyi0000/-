@@ -108,6 +108,25 @@ def run_single_clip_live_flow(
         )
         return screenshot_path
 
+    def capture_chatgpt_pause_artifacts() -> Path | None:
+        snapshotter = getattr(chatgpt_adapter, "capture_snapshot", None)
+        if not callable(snapshotter):
+            return None
+        context = getattr(chatgpt_page, "context", None)
+        if callable(context):
+            context = context()
+        if context is None:
+            return None
+        clip_pause_dir = request.state_path.parents[2] / "logs" / "chatgpt-pauses" / request.clip_id
+        screenshot_path = clip_pause_dir / "pause.png"
+        html_path = clip_pause_dir / "pause.html"
+        snapshotter(
+            context=context,
+            screenshot_path=screenshot_path,
+            html_path=html_path,
+        )
+        return screenshot_path
+
     task_id = (
         existing_state.runninghub_task_id
         if existing_state is not None and existing_state.runninghub_task_id
@@ -122,12 +141,14 @@ def run_single_clip_live_flow(
                 default_reference_image_path=reference_image_path,
             )
             if reference_result.pause_reason is not None:
+                screenshot_path = capture_chatgpt_pause_artifacts()
                 persist_state(
                     step="paused",
                     runninghub_task_id=None,
                     pause_reason=reference_result.pause_reason,
                     reference_image_path=None,
                     retry_count=retry_count,
+                    last_screenshot_path=screenshot_path,
                 )
                 return build_result("", None)
             resolved_reference_image_path = reference_result.output_path

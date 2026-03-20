@@ -285,6 +285,10 @@ class FakeRunningHubAdapter:
 
 
 class FakePausedChatGptAdapter:
+    def __init__(self) -> None:
+        self.snapshot_calls = 0
+        self.snapshot_contexts: list[object] = []
+
     def submit_reference_generation(self, page: object, request: object) -> object:
         return type(
             "Result",
@@ -295,6 +299,25 @@ class FakePausedChatGptAdapter:
                 "pause_reason": PauseReason.LOGIN_REQUIRED,
             },
         )()
+
+    def capture_snapshot(
+        self,
+        *,
+        context: object,
+        screenshot_path: Path,
+        html_path: Path,
+    ) -> None:
+        self.snapshot_calls += 1
+        self.snapshot_contexts.append(context)
+        screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+        screenshot_path.write_bytes(b"png-bytes")
+        html_path.write_text("<html>chatgpt pause</html>", encoding="utf-8")
+
+
+class FakeChatGptPausePage:
+    def __init__(self) -> None:
+        self.context = object()
 
 
 class FakeAuditRunner:
@@ -407,6 +430,39 @@ def test_run_single_clip_live_flow_stops_before_runninghub_when_chatgpt_pauses(
     assert result["task_id"] == ""
     assert saved_state.step == "paused"
     assert saved_state.pause_reason == PauseReason.LOGIN_REQUIRED
+
+
+def test_run_single_clip_live_flow_saves_chatgpt_pause_artifacts(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "work" / "live_state" / "clip-0001.json"
+    chatgpt_adapter = FakePausedChatGptAdapter()
+    runninghub_adapter = FakeRunningHubAdapter()
+
+    run_single_clip_live_flow(
+        request=LiveClipRequest(
+            clip_id="clip-0001",
+            clip_path=tmp_path / "work" / "clips" / "clip-0001.mp4",
+            frame_path=tmp_path / "work" / "frames" / "clip-0001.png",
+            prompt="replace actor_a with jett",
+            state_path=state_path,
+            rendered_output_path=tmp_path / "output" / "rendered" / "clip-0001.mp4",
+        ),
+        chatgpt_page=FakeChatGptPausePage(),
+        runninghub_page=object(),
+        chatgpt_adapter=chatgpt_adapter,
+        runninghub_adapter=runninghub_adapter,
+    )
+
+    pause_dir = tmp_path / "logs" / "chatgpt-pauses" / "clip-0001"
+    saved_state = load_live_state(state_path)
+
+    assert runninghub_adapter.submit_calls == 0
+    assert chatgpt_adapter.snapshot_calls == 1
+    assert saved_state.pause_reason == PauseReason.LOGIN_REQUIRED
+    assert saved_state.last_screenshot_path == pause_dir / "pause.png"
+    assert saved_state.last_screenshot_path.exists() is True
+    assert (pause_dir / "pause.html").exists() is True
 
 
 def test_run_single_clip_live_flow_polls_and_downloads_after_submit(
