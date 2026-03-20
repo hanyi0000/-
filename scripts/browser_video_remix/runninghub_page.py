@@ -12,6 +12,7 @@ from .browser_executor import (
     RunningHubTaskStatus,
 )
 from .live_state import PauseReason
+from .workflow_binding import WorkflowBinding, inspect_workflow_binding, load_workflow_binding
 
 
 class RunningHubPageAdapter:
@@ -700,7 +701,8 @@ class RunningHubPageAdapter:
                 task_id=None,
                 pause_reason=PauseReason.SELECTOR_MISSING,
             )
-        workflow = self._apply_graph_request_overrides(workflow, request)
+        binding = self._resolve_workflow_binding(workflow, request, workflow_id)
+        workflow = self._apply_graph_request_overrides(workflow, request, binding)
 
         if not self._load_graph_data(page, workflow):
             return RunningHubSubmitResult(
@@ -711,7 +713,7 @@ class RunningHubPageAdapter:
 
         if not self._upload_graph_asset(
             page,
-            self.GRAPH_SOURCE_VIDEO_NODE_ID,
+            self._binding_video_node_id(binding),
             request.clip_path,
         ):
             return RunningHubSubmitResult(
@@ -720,16 +722,17 @@ class RunningHubPageAdapter:
                 pause_reason=PauseReason.SELECTOR_MISSING,
             )
 
-        if not self._upload_graph_asset(
-            page,
-            self.GRAPH_REFERENCE_IMAGE_NODE_ID,
-            request.reference_image_path,
-        ):
-            return RunningHubSubmitResult(
-                status="paused",
-                task_id=None,
-                pause_reason=PauseReason.SELECTOR_MISSING,
-            )
+        for node_id, reference_path in self._build_reference_uploads(request, binding):
+            if not self._upload_graph_asset(
+                page,
+                node_id,
+                reference_path,
+            ):
+                return RunningHubSubmitResult(
+                    status="paused",
+                    task_id=None,
+                    pause_reason=PauseReason.SELECTOR_MISSING,
+                )
 
         task_id = self._queue_graph_prompt(page, self.GRAPH_PROMPT_NUMBER)
         if not task_id:
@@ -867,24 +870,108 @@ class RunningHubPageAdapter:
         self,
         workflow: dict[str, object],
         request: ClipExecutionRequest,
+        binding: WorkflowBinding | None = None,
     ) -> dict[str, object]:
         workflow_copy = json.loads(json.dumps(workflow))
         nodes = workflow_copy.get("nodes")
         if not isinstance(nodes, list):
             return workflow_copy
 
+        video_node_id = self._binding_video_node_id(binding)
         for node in nodes:
             if not isinstance(node, dict):
                 continue
-            if node.get("id") != self.GRAPH_SOURCE_VIDEO_NODE_ID:
-                continue
             widgets_values = node.get("widgets_values")
-            if isinstance(widgets_values, dict):
+            if node.get("id") == video_node_id and isinstance(widgets_values, dict):
                 if "custom_width" in widgets_values:
                     widgets_values["custom_width"] = request.width
                 if "custom_height" in widgets_values:
                     widgets_values["custom_height"] = request.height
+            if binding is not None:
+                self._apply_lora_control_override(
+                    node=node,
+                    request=request,
+                    optional_controls=binding.optional_controls,
+                )
         return workflow_copy
+
+    def _resolve_workflow_binding(
+        self,
+        workflow: dict[str, object],
+        request: ClipExecutionRequest,
+        workflow_id: str,
+    ) -> WorkflowBinding | None:
+        if request.workflow_binding_path is not None and request.workflow_binding_path.exists():
+            return load_workflow_binding(request.workflow_binding_path)
+
+        binding = inspect_workflow_binding(workflow)
+        if not binding.workflow_id:
+            return WorkflowBinding(
+                workflow_id=workflow_id,
+                video_node_id=binding.video_node_id,
+                reference_node_ids=binding.reference_node_ids,
+                optional_controls=binding.optional_controls,
+            )
+        return binding
+
+    def _binding_video_node_id(self, binding: WorkflowBinding | None) -> int:
+        if binding is None or binding.video_node_id is None:
+            return self.GRAPH_SOURCE_VIDEO_NODE_ID
+        return binding.video_node_id
+
+    def _build_reference_uploads(
+        self,
+        request: ClipExecutionRequest,
+        binding: WorkflowBinding | None,
+    ) -> list[tuple[int, Path]]:
+        reference_paths = list(request.person_reference_images.values())
+        if not reference_paths:
+            reference_paths = [request.reference_image_path]
+
+        node_ids = (
+            list(binding.reference_node_ids)
+            if binding is not None and binding.reference_node_ids
+            else [self.GRAPH_REFERENCE_IMAGE_NODE_ID]
+        )
+        if not node_ids:
+            return []
+
+        uploads: list[tuple[int, Path]] = []
+        for index, reference_path in enumerate(reference_paths):
+            node_id = node_ids[min(index, len(node_ids) - 1)]
+            uploads.append((node_id, reference_path))
+        return uploads
+
+    def _apply_lora_control_override(
+        self,
+        *,
+        node: dict[str, object],
+        request: ClipExecutionRequest,
+        optional_controls: dict[str, int],
+    ) -> None:
+        node_id = node.get("id")
+        if not isinstance(node_id, int):
+            return
+
+        widgets_values = node.get("widgets_values")
+        if not isinstance(widgets_values, dict):
+            return
+
+        for lora_name, lora_weight in request.lora_controls.items():
+            expected_keys = {lora_name, f"lora:{lora_name}"}
+            if not any(
+                control_key in expected_keys and control_node_id == node_id
+                for control_key, control_node_id in optional_controls.items()
+            ):
+                continue
+            if "strength_model" in widgets_values:
+                widgets_values["strength_model"] = lora_weight
+            if "strength_clip" in widgets_values:
+                widgets_values["strength_clip"] = lora_weight
+            if "weight" in widgets_values:
+                widgets_values["weight"] = lora_weight
+            if "lora_weight" in widgets_values:
+                widgets_values["lora_weight"] = lora_weight
 
     def _load_graph_data(self, page: object, workflow: dict[str, object]) -> bool:
         loader = getattr(page, "load_graph_data", None)

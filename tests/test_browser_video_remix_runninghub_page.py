@@ -7,6 +7,7 @@ from scripts.browser_video_remix.browser_executor import (
 )
 from scripts.browser_video_remix.live_state import PauseReason
 from scripts.browser_video_remix.runninghub_page import RunningHubPageAdapter
+from scripts.browser_video_remix.workflow_binding import WorkflowBinding, save_workflow_binding
 
 
 class FakeLocator:
@@ -622,6 +623,74 @@ def test_runninghub_adapter_loads_graph_uploads_assets_and_queues_prompt() -> No
     assert page.graph_queue_calls == [0]
     assert result.status == "submitted"
     assert result.task_id == "graph-task-123"
+
+
+def test_runninghub_adapter_uploads_multiple_person_references_and_applies_lora_controls(
+    tmp_path: Path,
+) -> None:
+    adapter = RunningHubPageAdapter(
+        workflow_url="https://www.runninghub.cn/workflow/2034283586668466178"
+    )
+    binding_path = tmp_path / "work" / "workflow_bindings" / "wan.json"
+    save_workflow_binding(
+        binding_path,
+        WorkflowBinding(
+            workflow_id="2034283586668466178",
+            video_node_id=63,
+            reference_node_ids=[57, 58],
+            optional_controls={"lora:jett_v1": 88},
+        ),
+    )
+    page = FakeRunningHubPage(
+        graph_api_available=True,
+        graph_task_id="task-123",
+        graph_workflow_content={
+            "workflow_id": "2034283586668466178",
+            "nodes": [
+                {"id": 57, "title": "Reference Image A"},
+                {"id": 58, "title": "Reference Image B"},
+                {
+                    "id": 63,
+                    "title": "Source Video",
+                    "widgets_values": {"custom_width": 1920, "custom_height": 1080},
+                },
+                {
+                    "id": 88,
+                    "title": "LoRA Jett v1",
+                    "widgets_values": {"lora_name": "jett_v1", "strength_model": 0.0, "strength_clip": 0.0},
+                },
+            ],
+        },
+    )
+    request = ClipExecutionRequest(
+        clip_id="clip-0001",
+        clip_path=Path("work/shots/clip-0001.mp4"),
+        reference_image_path=Path("work/chatgpt_refs/unused.png"),
+        prompt="unused",
+        width=1920,
+        height=1080,
+        person_reference_images={
+            "actor_a": Path("work/chatgpt_refs/clip-0001_actor_a.png"),
+            "actor_b": Path("work/chatgpt_refs/clip-0001_actor_b.png"),
+        },
+        lora_controls={"jett_v1": 0.8},
+        workflow_binding_path=binding_path,
+    )
+
+    result = adapter.submit_render_job(page, request)
+
+    lora_node = next(
+        node for node in page.graph_loaded_workflows[0]["nodes"] if node.get("id") == 88
+    )
+    assert result.status == "submitted"
+    assert page.graph_uploads[0] == (63, "work/shots/clip-0001.mp4")
+    assert len(page.graph_uploads) >= 3
+    assert page.graph_uploads[1:] == [
+        (57, "work/chatgpt_refs/clip-0001_actor_a.png"),
+        (58, "work/chatgpt_refs/clip-0001_actor_b.png"),
+    ]
+    assert lora_node["widgets_values"]["strength_model"] == 0.8
+    assert lora_node["widgets_values"]["strength_clip"] == 0.8
 
 
 def test_runninghub_adapter_falls_back_to_selector_submission_when_graph_api_is_unavailable() -> None:

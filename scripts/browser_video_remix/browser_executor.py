@@ -1,5 +1,5 @@
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .live_state import PauseReason
@@ -13,6 +13,9 @@ class ClipExecutionRequest:
     prompt: str
     width: int
     height: int
+    person_reference_images: dict[str, Path] = field(default_factory=dict)
+    lora_controls: dict[str, float] = field(default_factory=dict)
+    workflow_binding_path: Path | None = None
 
 
 @dataclass(frozen=True)
