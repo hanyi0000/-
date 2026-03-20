@@ -1,0 +1,39 @@
+{
+  "workflow_id": "2034283586668466178",
+  "nodes": [
+    {
+      "id": 63,
+      "title": "Source Video",
+      "class_type": "LoadVideo",
+      "widgets_values": {
+        "custom_width": 1920,
+        "custom_height": 1080
+      }
+    },
+    {
+      "id": 57,
+      "title": "Reference Image A",
+      "class_type": "LoadImage"
+    },
+    {
+      "id": 58,
+      "title": "Reference Image B",
+      "class_type": "LoadImage"
+    },
+    {
+      "id": 77,
+      "title": "Pose Control",
+      "class_type": "ControlNetPose"
+    },
+    {
+      "id": 88,
+      "title": "LoRA Jett v1",
+      "class_type": "LoraLoader",
+      "widgets_values": {
+        "lora_name": "jett_v1",
+        "strength_model": 0.0,
+        "strength_clip": 0.0
+      }
+    }
+  ]
+}
