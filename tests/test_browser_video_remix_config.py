@@ -99,3 +99,47 @@ def test_load_project_config_reads_proxy_browser_settings(tmp_path: Path) -> Non
 
     assert config.browser.executable_path.as_posix() == "D:/Chrome135_AllNew_2026.1.20/App/chrome.exe"
     assert config.browser.proxy_server == "socks5://127.0.0.1:1080"
+
+
+def test_load_project_config_reads_multiperson_identity_and_retry_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source_video: input/source.mp4\n"
+        "segmentation:\n"
+        "  mode: content\n"
+        "  min_seconds: 1.0\n"
+        "  threshold: 28.5\n"
+        "source_identities:\n"
+        "  actor_a:\n"
+        "    sample_images:\n"
+        "      - assets/source_people/actor_a_01.png\n"
+        "target_roles:\n"
+        "  jett:\n"
+        "    strategy: hybrid\n"
+        "    prompt: valorant jett\n"
+        "    reference_images:\n"
+        "      - assets/target_roles/jett/ref_01.png\n"
+        "    lora:\n"
+        "      name: jett_v1\n"
+        "      weight: 0.8\n"
+        "identity_mapping:\n"
+        "  actor_a: jett\n"
+        "quality_audit:\n"
+        "  max_background_delta: 0.18\n"
+        "retry:\n"
+        "  max_attempts: 3\n"
+        "actors:\n"
+        "  actor_a:\n"
+        "    character: jett\n"
+        "    reference_image: input/jett.png\n",
+        encoding="utf-8",
+    )
+
+    config = load_project_config(config_path)
+
+    assert config.segmentation.mode == "content"
+    assert config.source_identities["actor_a"].sample_images[0].as_posix().endswith("actor_a_01.png")
+    assert config.target_roles["jett"].strategy == "hybrid"
+    assert config.target_roles["jett"].lora.name == "jett_v1"
+    assert config.identity_mapping["actor_a"] == "jett"
+    assert config.retry.max_attempts == 3
