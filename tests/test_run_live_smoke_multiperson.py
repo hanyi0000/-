@@ -1,4 +1,6 @@
 import runpy
+import sys
+import types
 from pathlib import Path
 
 
@@ -7,6 +9,11 @@ SCRIPT_PATH = Path(r"D:/codex-worktrees/browser-video-remix-phase2/work/run_live
 
 def test_resolve_proxy_server_defaults_to_legacy_smoke_proxy(monkeypatch) -> None:
     monkeypatch.delenv("PROXY_SERVER", raising=False)
+    playwright_module = types.ModuleType("playwright")
+    sync_api_module = types.ModuleType("playwright.sync_api")
+    sync_api_module.sync_playwright = object()
+    monkeypatch.setitem(sys.modules, "playwright", playwright_module)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api_module)
 
     module = runpy.run_path(SCRIPT_PATH.as_posix(), run_name="smoke_helper_test")
 
