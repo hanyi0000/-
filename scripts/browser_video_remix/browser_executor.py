@@ -87,7 +87,16 @@ def build_chatgpt_reference_job(
     frame_path: Path,
     output_path: Path,
     prompt: str,
+    source_person_id: str | None = None,
 ) -> ChatGptReferenceRequest:
+    if source_person_id is not None:
+        return build_person_reference_job(
+            clip_id=clip_id,
+            source_person_id=source_person_id,
+            frame_path=frame_path,
+            output_path=output_path,
+            prompt=prompt,
+        )
     return ChatGptReferenceRequest(
         clip_id=clip_id,
         frame_path=frame_path,

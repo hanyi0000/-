@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from scripts.browser_video_remix.browser_executor import ChatGptReferenceRequest
+from scripts.browser_video_remix.browser_executor import (
+    ChatGptReferenceRequest,
+    PersonReferenceRequest,
+)
 from scripts.browser_video_remix.chatgpt_page import ChatGptPageAdapter
 from scripts.browser_video_remix.live_state import PauseReason
 
@@ -446,6 +449,31 @@ def test_chatgpt_adapter_saves_generated_reference_image_to_output_path(
         page.locators["[data-message-author-role='assistant'] img"].screenshot_paths
         == [output_path.as_posix()]
     )
+    assert output_path.read_bytes() == b"generated-reference-image"
+    assert result.status == "submitted"
+    assert result.output_path == output_path
+
+
+def test_chatgpt_adapter_saves_generated_reference_image_for_one_person_request(
+    tmp_path: Path,
+) -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    output_path = tmp_path / "work" / "chatgpt_refs" / "clip-0001_actor_a.png"
+    page = FakeChatGptPage(
+        attachment_visible=True,
+        has_generated_image=True,
+        generated_image_bytes=b"generated-reference-image",
+    )
+    request = PersonReferenceRequest(
+        clip_id="clip-0001",
+        source_person_id="actor_a",
+        frame_path=Path("work/keyframes/clip-0001_actor_a.png"),
+        output_path=output_path,
+        prompt="replace actor_a with jett",
+    )
+
+    result = adapter.submit_reference_generation(page=page, request=request)
+
     assert output_path.read_bytes() == b"generated-reference-image"
     assert result.status == "submitted"
     assert result.output_path == output_path

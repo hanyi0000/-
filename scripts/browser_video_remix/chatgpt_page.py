@@ -2,7 +2,7 @@ import base64
 import mimetypes
 from pathlib import Path
 
-from .browser_executor import AdapterResult, ChatGptReferenceRequest
+from .browser_executor import AdapterResult, ChatGptReferenceRequest, PersonReferenceRequest
 from .live_state import PauseReason
 from .playwright_driver import capture_page_snapshot
 
@@ -53,7 +53,7 @@ class ChatGptPageAdapter:
     def submit_reference_generation(
         self,
         page: object,
-        request: ChatGptReferenceRequest,
+        request: ChatGptReferenceRequest | PersonReferenceRequest,
     ) -> AdapterResult:
         session_result = self.ensure_session(page)
         if session_result.pause_reason is not None:
