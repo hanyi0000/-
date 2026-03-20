@@ -107,6 +107,13 @@ def _resolve_executable_path() -> Path | None:
     return None
 
 
+def _resolve_proxy_server() -> str | None:
+    override = os.environ.get("PROXY_SERVER")
+    if override:
+        return override
+    return "socks5://127.0.0.1:1080"
+
+
 def main() -> int:
     clip_path = _resolve_clip_path()
     person_frame_paths = _resolve_person_frame_paths()
@@ -164,7 +171,7 @@ def main() -> int:
                     default_timeout_ms=20_000,
                     headless=os.environ.get("HEADLESS", "0") == "1",
                     executable_path=_resolve_executable_path(),
-                    proxy_server=os.environ.get("PROXY_SERVER"),
+                    proxy_server=_resolve_proxy_server(),
                 ),
             )
             try:

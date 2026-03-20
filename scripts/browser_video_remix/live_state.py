@@ -7,6 +7,7 @@ from pathlib import Path
 class PauseReason(str, Enum):
     LOGIN_REQUIRED = "login_required"
     CAPTCHA_REQUIRED = "captcha_required"
+    PROXY_CONNECTION_FAILED = "proxy_connection_failed"
     SELECTOR_MISSING = "selector_missing"
     PAGE_CHANGED = "page_changed"
     MANUAL_CONFIRMATION_REQUIRED = "manual_confirmation_required"

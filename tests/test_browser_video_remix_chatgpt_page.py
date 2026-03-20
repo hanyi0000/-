@@ -211,6 +211,12 @@ class TimeoutChatGptPage(FakeChatGptPage):
         raise TimeoutError("navigation timed out")
 
 
+class ProxyFailureChatGptPage(FakeChatGptPage):
+    def goto(self, url: str, wait_until: str) -> None:
+        super().goto(url, wait_until)
+        raise RuntimeError("Page.goto: net::ERR_PROXY_CONNECTION_FAILED at https://chatgpt.com/")
+
+
 def test_chatgpt_adapter_pauses_when_login_is_required() -> None:
     adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
     result = adapter.submit_reference_generation(
@@ -258,6 +264,16 @@ def test_chatgpt_adapter_pauses_when_initial_navigation_times_out() -> None:
     assert page.goto_calls == [("https://chatgpt.com/g/test", "domcontentloaded")]
     assert result.status == "paused"
     assert result.pause_reason == PauseReason.MANUAL_CONFIRMATION_REQUIRED
+
+
+def test_chatgpt_adapter_reports_proxy_connection_failures_precisely() -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    page = ProxyFailureChatGptPage()
+
+    result = adapter.ensure_session(page)
+
+    assert result.status == "paused"
+    assert result.pause_reason == PauseReason.PROXY_CONNECTION_FAILED
 
 
 def test_chatgpt_adapter_pauses_when_cloudflare_challenge_is_present() -> None:

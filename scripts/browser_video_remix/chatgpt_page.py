@@ -33,7 +33,13 @@ class ChatGptPageAdapter:
     def ensure_session(self, page: object) -> AdapterResult:
         try:
             page.goto(self.start_url, wait_until="domcontentloaded")
-        except Exception:
+        except Exception as exc:
+            if "ERR_PROXY_CONNECTION_FAILED" in str(exc):
+                return AdapterResult(
+                    status="paused",
+                    output_path=None,
+                    pause_reason=PauseReason.PROXY_CONNECTION_FAILED,
+                )
             return AdapterResult(
                 status="paused",
                 output_path=None,
