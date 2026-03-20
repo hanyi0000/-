@@ -12,6 +12,10 @@ class ClipTask:
     height: int
     expected_resolution: str
     state: str
+    start_ms: int
+    end_ms: int
+    retry_count: int
+    person_reference_images: dict[str, str]
 
 
 def build_clip_task(
@@ -20,6 +24,8 @@ def build_clip_task(
     frame_path: Path,
     width: int,
     height: int,
+    start_ms: int = 0,
+    end_ms: int = 0,
 ) -> ClipTask:
     return ClipTask(
         clip_id=clip_id,
@@ -29,6 +35,10 @@ def build_clip_task(
         height=height,
         expected_resolution=f"{width}x{height}",
         state="pending",
+        start_ms=start_ms,
+        end_ms=end_ms,
+        retry_count=0,
+        person_reference_images={},
     )
 
 
@@ -42,6 +52,10 @@ def save_manifest(path: Path, tasks: list[ClipTask]) -> None:
             "height": task.height,
             "expected_resolution": task.expected_resolution,
             "state": task.state,
+            "start_ms": task.start_ms,
+            "end_ms": task.end_ms,
+            "retry_count": task.retry_count,
+            "person_reference_images": task.person_reference_images,
         }
         for task in tasks
     ]
@@ -59,6 +73,13 @@ def load_manifest(path: Path) -> list[ClipTask]:
             height=item["height"],
             expected_resolution=item["expected_resolution"],
             state=item["state"],
+            start_ms=int(item.get("start_ms", 0)),
+            end_ms=int(item.get("end_ms", 0)),
+            retry_count=int(item.get("retry_count", 0)),
+            person_reference_images={
+                str(person_id): str(image_path)
+                for person_id, image_path in item.get("person_reference_images", {}).items()
+            },
         )
         for item in raw
     ]

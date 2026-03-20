@@ -14,6 +14,10 @@ def test_save_and_load_manifest_round_trip(tmp_path: Path) -> None:
             height=1080,
             expected_resolution="1920x1080",
             state="pending",
+            start_ms=0,
+            end_ms=2400,
+            retry_count=1,
+            person_reference_images={"actor_a": "work/chatgpt_refs/clip-0001_actor_a.png"},
         )
     ]
 
@@ -22,3 +26,7 @@ def test_save_and_load_manifest_round_trip(tmp_path: Path) -> None:
 
     assert loaded[0].clip_id == "clip-0001"
     assert loaded[0].clip_path.as_posix() == "work/clips/clip-0001.mp4"
+    assert loaded[0].start_ms == 0
+    assert loaded[0].end_ms == 2400
+    assert loaded[0].retry_count == 1
+    assert loaded[0].person_reference_images["actor_a"] == "work/chatgpt_refs/clip-0001_actor_a.png"
