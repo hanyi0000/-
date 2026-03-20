@@ -1,4 +1,5 @@
 import os
+import socket
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -111,7 +112,16 @@ def _resolve_proxy_server() -> str | None:
     override = os.environ.get("PROXY_SERVER")
     if override:
         return override
+    for port in (1080, 7890):
+        if _port_is_open("127.0.0.1", port):
+            return f"socks5://127.0.0.1:{port}"
     return "socks5://127.0.0.1:1080"
+
+
+def _port_is_open(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.5)
+        return sock.connect_ex((host, port)) == 0
 
 
 def main() -> int:
