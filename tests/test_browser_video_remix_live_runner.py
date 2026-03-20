@@ -9,6 +9,7 @@ from scripts.browser_video_remix.live_state import (
     save_live_state,
 )
 from scripts.browser_video_remix.paths import build_project_paths
+from scripts.browser_video_remix.replacement_audit import ReplacementAuditResult
 from scripts.browser_video_remix.runninghub_page import RunningHubPageAdapter
 
 
@@ -173,6 +174,27 @@ class FakeChatGptAdapter:
         )()
 
 
+class FakeMultiPersonChatGptAdapter:
+    def __init__(self) -> None:
+        self.requests: list[object] = []
+
+    def submit_reference_generation(self, page: object, request: object) -> object:
+        del page
+        self.requests.append(request)
+        output_path = request.output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(f"reference:{request.clip_id}".encode("utf-8"))
+        return type(
+            "Result",
+            (),
+            {
+                "status": "completed",
+                "output_path": output_path,
+                "pause_reason": None,
+            },
+        )()
+
+
 class FakeRunningHubAdapter:
     def __init__(
         self,
@@ -187,6 +209,7 @@ class FakeRunningHubAdapter:
         self.download_task_ids: list[str | None] = []
         self.ensure_session_calls = 0
         self.snapshot_calls = 0
+        self.submit_requests: list[object] = []
         self._submit_result = submit_result or {
             "status": "submitted",
             "task_id": "task-123",
@@ -217,8 +240,9 @@ class FakeRunningHubAdapter:
         )()
 
     def submit_render_job(self, page: object, request: object) -> object:
-        del page, request
+        del page
         self.submit_calls += 1
+        self.submit_requests.append(request)
         return type("Result", (), self._submit_result)()
 
     def poll_render_status(self, page: object, task_id: str) -> object:
@@ -271,6 +295,44 @@ class FakePausedChatGptAdapter:
                 "pause_reason": PauseReason.LOGIN_REQUIRED,
             },
         )()
+
+
+class FakeAuditRunner:
+    def __init__(
+        self,
+        *,
+        reference_results: list[ReplacementAuditResult] | None = None,
+        render_results: list[ReplacementAuditResult] | None = None,
+    ) -> None:
+        self.reference_results = list(reference_results or [])
+        self.render_results = list(render_results or [])
+        self.reference_calls = 0
+        self.render_calls = 0
+
+    def run_reference_audit(
+        self,
+        *,
+        clip_id: str,
+        person_reference_images: dict[str, Path],
+    ) -> ReplacementAuditResult:
+        del clip_id, person_reference_images
+        self.reference_calls += 1
+        if self.reference_results:
+            return self.reference_results.pop(0)
+        return ReplacementAuditResult(status="passed", finding_type="ok", confidence=1.0)
+
+    def run_render_audit(
+        self,
+        *,
+        clip_id: str,
+        rendered_output_path: Path,
+        person_reference_images: dict[str, Path],
+    ) -> ReplacementAuditResult:
+        del clip_id, rendered_output_path, person_reference_images
+        self.render_calls += 1
+        if self.render_results:
+            return self.render_results.pop(0)
+        return ReplacementAuditResult(status="passed", finding_type="ok", confidence=1.0)
 
 
 def test_run_single_clip_live_flow_returns_state_path_and_task_id(
@@ -513,3 +575,74 @@ def test_run_single_clip_live_flow_saves_runninghub_pause_artifacts(
     assert saved_state.last_screenshot_path.exists() is True
     assert (pause_dir / "pause.html").exists() is True
     assert (pause_dir / "pause.json").exists() is True
+
+
+def test_run_single_clip_live_flow_generates_person_references_and_runs_reference_audit(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "work" / "live_state" / "clip-0001.json"
+    chatgpt_adapter = FakeMultiPersonChatGptAdapter()
+    runninghub_adapter = FakeRunningHubAdapter()
+    audit_runner = FakeAuditRunner()
+
+    run_single_clip_live_flow(
+        request=LiveClipRequest(
+            clip_id="clip-0001",
+            clip_path=tmp_path / "work" / "shots" / "clip-0001.mp4",
+            frame_path=tmp_path / "work" / "keyframes" / "clip-0001.png",
+            prompt="replace actor_a with jett",
+            state_path=state_path,
+            rendered_output_path=tmp_path / "output" / "rendered" / "clip-0001.mp4",
+            person_frame_paths={
+                "actor_a": tmp_path / "work" / "keyframes" / "clip-0001_actor_a.png",
+                "actor_b": tmp_path / "work" / "keyframes" / "clip-0001_actor_b.png",
+            },
+        ),
+        chatgpt_page=object(),
+        runninghub_page=object(),
+        chatgpt_adapter=chatgpt_adapter,
+        runninghub_adapter=runninghub_adapter,
+        audit_runner=audit_runner,
+    )
+
+    state = load_live_state(state_path)
+
+    assert [request.source_person_id for request in chatgpt_adapter.requests] == ["actor_a", "actor_b"]
+    assert sorted(runninghub_adapter.submit_requests[0].person_reference_images) == ["actor_a", "actor_b"]
+    assert audit_runner.reference_calls == 1
+    assert state.person_reference_images["actor_a"].as_posix().endswith("clip-0001_actor_a.png")
+    assert state.person_reference_images["actor_b"].as_posix().endswith("clip-0001_actor_b.png")
+
+
+def test_run_single_clip_live_flow_pauses_and_notifies_after_three_audit_failures(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "work" / "live_state" / "clip-0001.json"
+    runninghub_adapter = FakeRunningHubAdapter()
+    audit_results = [
+        ReplacementAuditResult(status="retry", finding_type="not_replaced", confidence=0.9),
+        ReplacementAuditResult(status="retry", finding_type="not_replaced", confidence=0.9),
+        ReplacementAuditResult(status="retry", finding_type="not_replaced", confidence=0.9),
+    ]
+
+    run_single_clip_live_flow(
+        request=LiveClipRequest(
+            clip_id="clip-0001",
+            clip_path=tmp_path / "work" / "shots" / "clip-0001.mp4",
+            frame_path=tmp_path / "work" / "keyframes" / "clip-0001.png",
+            prompt="replace actor_a with jett",
+            state_path=state_path,
+            rendered_output_path=tmp_path / "output" / "rendered" / "clip-0001.mp4",
+            max_retry_attempts=3,
+        ),
+        chatgpt_page=object(),
+        runninghub_page=object(),
+        chatgpt_adapter=FakeChatGptAdapter(),
+        runninghub_adapter=runninghub_adapter,
+        audit_runner=FakeAuditRunner(render_results=audit_results),
+    )
+
+    state = load_live_state(state_path)
+    assert state.step == "paused"
+    assert state.retry_count == 3
+    assert (build_project_paths(tmp_path).logs_notifications_dir / "clip-0001.json").exists() is True

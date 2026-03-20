@@ -50,12 +50,25 @@ def build_chatgpt_snapshot_request(
     )
 
 
+def build_live_run_summary(project_dir: Path, clip_id: str) -> dict[str, str]:
+    paths = _build_project_paths(project_dir)
+    notification_path = paths.logs_notifications_dir / f"{clip_id}.json"
+    return {
+        "clip_id": clip_id,
+        "state_path": (paths.work_dir / "live_state" / f"{clip_id}.json").as_posix(),
+        "rendered_output_path": (paths.output_rendered_dir / f"{clip_id}.mp4").as_posix(),
+        "notification_path": notification_path.as_posix(),
+        "notification_status": "present" if notification_path.exists() else "missing",
+    }
+
+
 __all__ = [
     "ChatGptSnapshotRequest",
     "LiveRunRequest",
     "ProjectPaths",
     "build_chatgpt_snapshot_request",
     "build_live_run_request",
+    "build_live_run_summary",
     "build_project_paths",
     "build_single_clip_flow_summary",
 ]
