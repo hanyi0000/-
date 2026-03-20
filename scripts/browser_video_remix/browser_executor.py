@@ -24,6 +24,11 @@ class ChatGptReferenceRequest:
 
 
 @dataclass(frozen=True)
+class PersonReferenceRequest(ChatGptReferenceRequest):
+    source_person_id: str
+
+
+@dataclass(frozen=True)
 class AdapterResult:
     status: str
     output_path: Path | None
@@ -85,6 +90,22 @@ def build_chatgpt_reference_job(
 ) -> ChatGptReferenceRequest:
     return ChatGptReferenceRequest(
         clip_id=clip_id,
+        frame_path=frame_path,
+        output_path=output_path,
+        prompt=_build_chatgpt_edit_prompt(prompt),
+    )
+
+
+def build_person_reference_job(
+    clip_id: str,
+    source_person_id: str,
+    frame_path: Path,
+    output_path: Path,
+    prompt: str,
+) -> PersonReferenceRequest:
+    return PersonReferenceRequest(
+        clip_id=clip_id,
+        source_person_id=source_person_id,
         frame_path=frame_path,
         output_path=output_path,
         prompt=_build_chatgpt_edit_prompt(prompt),
