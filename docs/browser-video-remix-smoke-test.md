@@ -1,94 +1,106 @@
-# Browser Video Remix Smoke Test
+# Browser Video Remix Multiperson Smoke Test
 
 ## Goal
 
-Verify the browser video remix pipeline can run one clip end to end before attempting a full batch.
+Verify the multiperson browser remix pipeline can process one prepared shot end to end, persist per-person references, apply workflow bindings, and either validate or pause with explicit audit evidence before attempting a larger batch.
 
 ## Prerequisites
 
-- Python available at `F:\anconda3\python.exe`
-- `pytest` available in that environment
-- `ffmpeg` and `ffprobe` available on `PATH`
-- Playwright and browser dependencies installed before real browser automation work begins
+- Python available in the repo environment
+- `pytest`, `Playwright`, `ffmpeg`, and `ffprobe` available
 - A persistent browser profile available for authenticated ChatGPT and RunningHub sessions
+- One prepared shot under `work/shots/` or a fallback smoke clip under `work/clips/`
+- Two prepared person keyframes under `work/keyframes/` or explicit frame-path overrides
 
 ## Project Setup Checklist
 
-1. Create a project directory under the chosen D drive workspace.
-2. Place the raw input video under `input/`.
-3. Create `config.yaml` with:
-   - source video path
-   - actor to character mappings
-   - reference image paths
-   - resolution rules
-   - RunningHub workflow URL and fixed parameters
-4. Confirm all referenced files exist before running any batch command.
+1. Prepare one dual-person shot and preserve a stable `clip_id`.
+2. Confirm the target role mapping is fixed before the smoke begins.
+3. Confirm each source person has at least one usable keyframe candidate.
+4. Confirm the target RunningHub workflow URL is the Wan Animate workflow under test.
+5. Confirm the workflow binding cache is either present under `work/workflow_bindings/` or can be rebuilt from the live workflow.
 
 ## Dry-Run Checklist
 
-1. Run the current test suite:
+1. Run the current automated test suite subset or full suite.
+2. Confirm the planning helpers now point to shot-based paths:
+   - `plan_prepare_run()` resolves `work/shots`, `work/keyframes`, and `work/manifest.json`
+   - `build_live_run_request()` resolves `work/live_state/<clip_id>.json` and `work/downloads`
+   - `build_live_run_summary()` resolves `logs/notifications/<clip_id>.json`
+3. Confirm the workflow binding fixture detects:
+   - one source video node
+   - multiple reference image nodes
+   - optional controls such as `pose` and LoRA widgets
+
+## Multiperson Browser Smoke Test
+
+Use one prepared shot only.
+
+1. Build or confirm a shot-level manifest entry with:
+   - `clip_id`
+   - `start_ms` / `end_ms`
+   - `retry_count`
+   - `person_reference_images`
+2. Confirm the shot has one person frame for each mapped source identity.
+3. Launch the smoke helper:
 
 ```powershell
-& 'F:\anconda3\python.exe' -m pytest -q
+$env:PYTHONPATH='D:\codex-worktrees\browser-video-remix-phase2'
+$env:RESET_STATE='0'
+uv run --with playwright python D:\codex-worktrees\browser-video-remix-phase2\work\run_live_smoke_multiperson.py
 ```
 
-2. Confirm all tests pass.
-3. Verify the current planning helpers before live browser work:
-   - confirm `build_project_paths()` resolves the expected project layout
-   - confirm `plan_prepare_run()` points to `work/clips`, `work/frames`, and `work/manifest.json`
-   - confirm `build_single_clip_flow_summary()` points to the expected manifest and rendered output target
-   - confirm `build_live_run_request()` points to `work/live_state/<clip_id>.json` and `work/downloads`
+4. Confirm the helper reports:
+   - the chosen shot path
+   - the chosen per-person frame paths
+   - the resulting `clip_id`
+   - the RunningHub `task_id`
+   - the final live-state step
+5. Confirm one reference image is produced for each person and saved under `work/chatgpt_refs/`.
+6. Confirm the reference audit step runs before RunningHub submission.
+7. Confirm the RunningHub submission uploads:
+   - the source shot
+   - each per-person reference image
+   - any mapped LoRA control values from the workflow binding
+8. Confirm the render audit step runs after download.
+9. Confirm the final state is either:
+   - `validated`, or
+   - a deliberate `paused` state with a precise pause reason and evidence
 
-## Single-Clip Browser Smoke Test
+## Forced Retry / Notification Checklist
 
-Use one short clip only.
+1. Re-run the smoke helper with three forced render-audit failures:
 
-1. Prepare one clip and one extracted frame.
-2. Build a one-clip summary and confirm:
-   - the manifest target ends with `work/manifest.json`
-   - the rendered output target ends with `output/rendered/<clip_id>.mp4`
-3. Build the live run request and confirm:
-   - the state file target ends with `work/live_state/<clip_id>.json`
-   - the download directory target ends with `work/downloads`
-4. Launch the browser executor with a persistent profile.
-5. Confirm ChatGPT opens with the authenticated session intact.
-6. Upload the frame and submit the generated prompt.
-7. Confirm one reference image is produced and saved to the expected working directory.
-8. Open the configured RunningHub workflow page.
-9. Upload the clip and reference image.
-10. Confirm the submitted resolution matches the clip resolution.
-11. Submit the workflow and capture the returned task ID.
-12. Wait for completion and download the rendered clip.
-13. Confirm the output lands in the rendered output directory with the expected clip ID.
-14. If RunningHub pauses, confirm pause evidence is written under `logs/runninghub-pauses/<clip_id>/` as:
-    - `pause.png`
-    - `pause.html`
-    - `pause.json`
-    - and that `work/live_state/<clip_id>.json` records `last_screenshot_path`
+```powershell
+$env:PYTHONPATH='D:\codex-worktrees\browser-video-remix-phase2'
+$env:RESET_STATE='1'
+$env:FORCE_RENDER_AUDIT_FAILURES='3'
+uv run --with playwright python D:\codex-worktrees\browser-video-remix-phase2\work\run_live_smoke_multiperson.py
+```
 
-## Resume Checklist
+2. Confirm retries never exceed three attempts.
+3. Confirm the final live state is `paused`.
+4. Confirm a notification artifact is written under `logs/notifications/<clip_id>.json`.
+5. Confirm the notification JSON includes the audit finding type, retry count, and selected action.
 
-1. Stop the process after one successful step.
-2. Restart the pipeline.
-3. Confirm the live state file records the last completed step and any pause reason.
-4. If the stop occurred on a RunningHub pause, confirm the saved state points to the captured pause screenshot.
-5. Confirm already completed steps are skipped.
-6. Confirm failed or incomplete steps remain pending.
+## Pause Evidence Checklist
 
-## Validation Checklist
-
-1. Confirm missing outputs are reported explicitly.
-2. Confirm output files are grouped into success and failure destinations.
-3. Confirm logs and screenshots are retained for failed browser steps.
-4. Confirm RunningHub pause evidence includes screenshot, page HTML, and JSON summary artifacts.
-5. Confirm the final report lists ready clips and failed clips separately.
+1. If RunningHub pauses, confirm pause evidence is written under `logs/runninghub-pauses/<clip_id>/`:
+   - `pause.png`
+   - `pause.html`
+   - `pause.json`
+2. Confirm `work/live_state/<clip_id>.json` records:
+   - `last_screenshot_path`
+   - `person_reference_images`
+   - `retry_count`
 
 ## Exit Criteria
 
-Do not run a full sequence until:
+Do not run a larger multiperson batch until:
 
-- tests are green
-- dry-run metadata looks correct
-- one clip completes through ChatGPT and RunningHub
-- resume behavior is verified
-- output validation reports the expected result
+- automated tests are green
+- one shot completes the multiperson path or pauses with explicit evidence
+- per-person references persist correctly
+- workflow binding uploads all required inputs
+- render-audit retries stop at three attempts
+- notification evidence is written for forced retry exhaustion
