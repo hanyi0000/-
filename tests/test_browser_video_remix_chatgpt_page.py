@@ -109,6 +109,7 @@ class FakeChatGptPage:
         self.has_generated_viewer_image = has_generated_viewer_image
         self.evaluate_handle_calls: list[object] = []
         self.expect_response_calls = 0
+        self.composer_wait_calls: list[tuple[str, object | None, object | None]] = []
         self.wait_for_function_calls: list[tuple[str, object | None, object | None]] = []
         self.locators: dict[str, FakeLocator] = {}
         self.expected_responses: list[FakeResponse] = []
@@ -209,6 +210,9 @@ class FakeChatGptPage:
         arg: object | None = None,
         timeout: object | None = None,
     ) -> None:
+        if arg == ChatGptPageAdapter.HYDRATED_PROMPT_SELECTOR:
+            self.composer_wait_calls.append((expression, arg, timeout))
+            return
         self.wait_for_function_calls.append((expression, arg, timeout))
         if not self.has_generated_image and not self.has_generated_viewer_image:
             raise TimeoutError("generated image not ready")
@@ -224,6 +228,38 @@ class ProxyFailureChatGptPage(FakeChatGptPage):
     def goto(self, url: str, wait_until: str) -> None:
         super().goto(url, wait_until)
         raise RuntimeError("Page.goto: net::ERR_PROXY_CONNECTION_FAILED at https://chatgpt.com/")
+
+
+class HydratingChatGptPage(FakeChatGptPage):
+    def __init__(self) -> None:
+        super().__init__(
+            has_prompt_textarea=True,
+            has_contenteditable_prompt=True,
+            has_generated_image=True,
+            upload_files_visible=False,
+            upload_photos_visible=True,
+        )
+        self.locators["#prompt-textarea[contenteditable='true']"]._visible = False
+
+    def wait_for_function(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+        timeout: object | None = None,
+    ) -> None:
+        if arg == ChatGptPageAdapter.HYDRATED_PROMPT_SELECTOR:
+            self.composer_wait_calls.append((expression, arg, timeout))
+            self.locators["textarea[name='prompt-textarea']"]._visible = False
+            self.locators["#prompt-textarea[contenteditable='true']"]._visible = True
+            self.expected_responses.extend(
+                [
+                    FakeResponse("https://chatgpt.com/backend-api/files"),
+                    FakeResponse("https://chatgpt.com/backend-api/files/process_upload_stream"),
+                ]
+            )
+            return
+        super().wait_for_function(expression, arg=arg, timeout=timeout)
 
 
 def test_chatgpt_adapter_pauses_when_login_is_required() -> None:
@@ -349,6 +385,28 @@ def test_chatgpt_adapter_uses_contenteditable_prompt_when_textarea_is_missing() 
 
     assert result.status == "submitted"
     assert result.pause_reason is None
+
+
+def test_chatgpt_adapter_waits_for_hydrated_composer_before_uploading() -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    page = HydratingChatGptPage()
+    request = ChatGptReferenceRequest(
+        clip_id="clip-0001",
+        frame_path=Path("work/frames/chatgpt-edge-proxy-smoke.png"),
+        output_path=Path("work/chatgpt_refs/clip-0001.png"),
+        prompt="replace actor_a with jett",
+    )
+
+    result = adapter.submit_reference_generation(page=page, request=request)
+
+    assert len(page.composer_wait_calls) == 1
+    assert len(page.wait_for_function_calls) == 1
+    assert page.locators["textarea[name='prompt-textarea']"].filled_values == []
+    assert page.locators["#prompt-textarea[contenteditable='true']"].filled_values == [
+        "replace actor_a with jett"
+    ]
+    assert page.expect_response_calls == 2
+    assert result.status == "submitted"
 
 
 def test_chatgpt_adapter_pauses_when_attachment_is_not_confirmed() -> None:

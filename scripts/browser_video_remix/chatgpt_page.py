@@ -13,6 +13,7 @@ class ChatGptPageAdapter:
         "textarea[name='prompt-textarea']",
         "#prompt-textarea[contenteditable='true']",
     )
+    HYDRATED_PROMPT_SELECTOR = "#prompt-textarea[contenteditable='true']"
     RESULT_IMAGE_SELECTORS = (
         "[data-message-author-role='assistant'] img",
         "img[alt*='已生成图片']",
@@ -20,6 +21,7 @@ class ChatGptPageAdapter:
     )
     SEND_BUTTON_SELECTOR = "[data-testid='send-button']"
     DRAG_DROP_EVENTS = ("dragenter", "dragover", "drop")
+    COMPOSER_READY_TIMEOUT_MS = 5_000
     GENERATED_IMAGE_TIMEOUT_MS = 120_000
     LOGIN_BUTTON_TEXTS = ("\u767b\u5f55", "Log in")
     LOGIN_REQUIRED_TEXT = (
@@ -72,6 +74,7 @@ class ChatGptPageAdapter:
         if session_result.pause_reason is not None:
             return session_result
 
+        self._wait_for_hydrated_composer(page)
         file_input = self._find_first_available_locator(
             page,
             self.FILE_INPUT_SELECTORS,
@@ -124,6 +127,34 @@ class ChatGptPageAdapter:
             output_path=request.output_path,
             pause_reason=None,
         )
+
+    def _wait_for_hydrated_composer(self, page: object) -> None:
+        waiter = getattr(page, "wait_for_function", None)
+        if not callable(waiter):
+            return
+        try:
+            waiter(
+                """
+                (selector) => {
+                  const prompt = document.querySelector(selector);
+                  if (!prompt) {
+                    return false;
+                  }
+                  const rect = prompt.getBoundingClientRect();
+                  const style = window.getComputedStyle(prompt);
+                  return (
+                    rect.width > 0 &&
+                    rect.height > 0 &&
+                    style.display !== "none" &&
+                    style.visibility !== "hidden"
+                  );
+                }
+                """,
+                arg=self.HYDRATED_PROMPT_SELECTOR,
+                timeout=self.COMPOSER_READY_TIMEOUT_MS,
+            )
+        except Exception:
+            return
 
     def capture_snapshot(
         self,
