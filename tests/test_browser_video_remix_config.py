@@ -1,0 +1,145 @@
+from pathlib import Path
+
+from scripts.browser_video_remix.config import load_project_config
+
+
+def test_load_project_config_reads_actor_mapping(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source_video: input/source.mp4\n"
+        "actors:\n"
+        "  actor_a:\n"
+        "    character: jett\n"
+        "    reference_image: input/jett.png\n",
+        encoding="utf-8",
+    )
+
+    config = load_project_config(config_path)
+
+    assert config.source_video.as_posix() == "input/source.mp4"
+    assert config.actors["actor_a"].character == "jett"
+
+
+def test_load_project_config_reads_browser_and_split_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source_video: input/source.mp4\n"
+        "split:\n"
+        "  mode: fixed_duration\n"
+        "  seconds: 2\n"
+        "browser:\n"
+        "  profile_dir: browser/profile\n"
+        "  headless: false\n"
+        "runninghub:\n"
+        "  workflow_url: https://example.com/workflow\n"
+        "actors:\n"
+        "  actor_a:\n"
+        "    character: jett\n"
+        "    reference_image: input/jett.png\n",
+        encoding="utf-8",
+    )
+
+    config = load_project_config(config_path)
+
+    assert config.split.mode == "fixed_duration"
+    assert config.split.seconds == 2
+    assert config.browser.profile_dir.as_posix() == "browser/profile"
+    assert config.runninghub.workflow_url == "https://example.com/workflow"
+
+
+def test_load_project_config_reads_live_browser_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source_video: input/source.mp4\n"
+        "chatgpt:\n"
+        "  start_url: https://chatgpt.com/g/test\n"
+        "  prompt_timeout_ms: 90000\n"
+        "browser:\n"
+        "  profile_dir: browser/profile\n"
+        "  downloads_dir: work/downloads\n"
+        "  default_timeout_ms: 15000\n"
+        "  headless: false\n"
+        "runninghub:\n"
+        "  workflow_url: https://example.com/workflow\n"
+        "  poll_interval_seconds: 5\n"
+        "actors:\n"
+        "  actor_a:\n"
+        "    character: jett\n"
+        "    reference_image: input/jett.png\n",
+        encoding="utf-8",
+    )
+
+    config = load_project_config(config_path)
+
+    assert config.chatgpt.start_url == "https://chatgpt.com/g/test"
+    assert config.chatgpt.prompt_timeout_ms == 90000
+    assert config.browser.downloads_dir.as_posix() == "work/downloads"
+    assert config.browser.default_timeout_ms == 15000
+    assert config.runninghub.poll_interval_seconds == 5
+
+
+def test_load_project_config_reads_proxy_browser_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source_video: input/source.mp4\n"
+        "browser:\n"
+        "  profile_dir: browser/profile\n"
+        "  downloads_dir: work/downloads\n"
+        "  executable_path: D:/Chrome135_AllNew_2026.1.20/App/chrome.exe\n"
+        "  proxy_server: socks5://127.0.0.1:1080\n"
+        "  headless: false\n"
+        "actors:\n"
+        "  actor_a:\n"
+        "    character: jett\n"
+        "    reference_image: input/jett.png\n",
+        encoding="utf-8",
+    )
+
+    config = load_project_config(config_path)
+
+    assert config.browser.executable_path.as_posix() == "D:/Chrome135_AllNew_2026.1.20/App/chrome.exe"
+    assert config.browser.proxy_server == "socks5://127.0.0.1:1080"
+
+
+def test_load_project_config_reads_multiperson_identity_and_retry_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source_video: input/source.mp4\n"
+        "segmentation:\n"
+        "  mode: content\n"
+        "  min_seconds: 1.0\n"
+        "  threshold: 28.5\n"
+        "source_identities:\n"
+        "  actor_a:\n"
+        "    sample_images:\n"
+        "      - assets/source_people/actor_a_01.png\n"
+        "target_roles:\n"
+        "  jett:\n"
+        "    strategy: hybrid\n"
+        "    prompt: valorant jett\n"
+        "    reference_images:\n"
+        "      - assets/target_roles/jett/ref_01.png\n"
+        "    lora:\n"
+        "      name: jett_v1\n"
+        "      weight: 0.8\n"
+        "identity_mapping:\n"
+        "  actor_a: jett\n"
+        "quality_audit:\n"
+        "  max_background_delta: 0.18\n"
+        "retry:\n"
+        "  max_attempts: 3\n"
+        "actors:\n"
+        "  actor_a:\n"
+        "    character: jett\n"
+        "    reference_image: input/jett.png\n",
+        encoding="utf-8",
+    )
+
+    config = load_project_config(config_path)
+
+    assert config.segmentation.mode == "content"
+    assert config.source_identities["actor_a"].sample_images[0].as_posix().endswith("actor_a_01.png")
+    assert config.target_roles["jett"].strategy == "hybrid"
+    assert config.target_roles["jett"].lora.name == "jett_v1"
+    assert config.identity_mapping["actor_a"] == "jett"
+    assert config.retry.max_attempts == 3
