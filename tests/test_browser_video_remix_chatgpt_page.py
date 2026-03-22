@@ -91,6 +91,7 @@ class FakeChatGptPage:
         upload_photos_visible: bool = False,
         has_contenteditable_prompt: bool = False,
         attachment_visible: bool = False,
+        attachment_group_visible: bool = False,
         file_input_upload_success: bool = False,
         drop_upload_success: bool = False,
         has_generated_image: bool = False,
@@ -103,6 +104,7 @@ class FakeChatGptPage:
         self.url = url
         self.html = html
         self.attachment_visible = attachment_visible
+        self.attachment_group_visible = attachment_group_visible
         self.has_generated_image = has_generated_image
         self.has_generated_viewer_image = has_generated_viewer_image
         self.evaluate_handle_calls: list[object] = []
@@ -173,6 +175,11 @@ class FakeChatGptPage:
         self.url = url
 
     def locator(self, selector: str) -> FakeLocator:
+        if (
+            self.attachment_group_visible
+            and selector.startswith("[role='group'][aria-label*=")
+        ):
+            return FakeLocator(count=1, visible=True)
         return self.locators.get(selector, FakeLocator())
 
     def get_by_role(self, role: str, name: str) -> FakeLocator:
@@ -359,6 +366,18 @@ def test_chatgpt_adapter_pauses_when_attachment_is_not_confirmed() -> None:
     assert page.locators["[data-testid='send-button']"].clicks == 0
     assert result.status == "paused"
     assert result.pause_reason == PauseReason.MANUAL_CONFIRMATION_REQUIRED
+
+
+def test_chatgpt_adapter_recognizes_attachment_tile_group_by_aria_label() -> None:
+    adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
+    page = FakeChatGptPage(attachment_visible=False, attachment_group_visible=True)
+
+    result = adapter._is_attachment_ready(
+        page,
+        Path("work/frames/chatgpt-edge-proxy-smoke.png"),
+    )
+
+    assert result is True
 
 
 def test_chatgpt_adapter_submits_when_drag_drop_upload_completes(tmp_path: Path) -> None:

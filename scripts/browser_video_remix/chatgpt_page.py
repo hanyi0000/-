@@ -183,6 +183,13 @@ class ChatGptPageAdapter:
         filename_match = self._get_by_text(page, frame_path.name)
         if filename_match is not None and self._locator_is_visible(filename_match):
             return True
+        escaped_name = frame_path.name.replace("\\", "\\\\").replace("'", "\\'")
+        attachment_tile = self._find_required_locator(
+            page,
+            f"[role='group'][aria-label*='{escaped_name}' i]",
+        )
+        if attachment_tile is not None and self._locator_is_visible(attachment_tile):
+            return True
         attachment_locator = self._find_required_locator(page, "[data-testid*='attachment']")
         return attachment_locator is not None and self._locator_is_visible(attachment_locator)
 
