@@ -346,14 +346,17 @@ class ChatGptPageAdapter:
         selectors: tuple[str, ...],
         require_visible: bool,
     ) -> object | None:
+        fallback_locator = None
         for selector in selectors:
             locator = self._find_required_locator(page, selector)
             if locator is None:
                 continue
             if self._locator_is_visible(locator):
                 return locator
-            if not require_visible:
-                return locator
+            if not require_visible and fallback_locator is None:
+                fallback_locator = locator
+        if not require_visible:
+            return fallback_locator
         return None
 
     def _get_by_role(self, page: object, role: str, name: str) -> object | None:

@@ -87,6 +87,8 @@ class FakeChatGptPage:
         has_file_input: bool = True,
         has_prompt_textarea: bool = True,
         has_upload_photos_input: bool = True,
+        upload_files_visible: bool = False,
+        upload_photos_visible: bool = False,
         has_contenteditable_prompt: bool = False,
         attachment_visible: bool = False,
         file_input_upload_success: bool = False,
@@ -123,9 +125,9 @@ class FakeChatGptPage:
                 ]
             )
         if has_file_input:
-            self.locators["#upload-files"] = FakeLocator(count=1)
+            self.locators["#upload-files"] = FakeLocator(count=1, visible=upload_files_visible)
         if has_upload_photos_input:
-            self.locators["#upload-photos"] = FakeLocator(count=1)
+            self.locators["#upload-photos"] = FakeLocator(count=1, visible=upload_photos_visible)
         if has_prompt_textarea:
             self.locators["textarea[name='prompt-textarea']"] = FakeLocator(
                 count=1,
@@ -412,18 +414,20 @@ def test_chatgpt_adapter_submits_when_file_input_upload_completes() -> None:
     assert result.status == "submitted"
 
 
-def test_chatgpt_adapter_prefers_upload_files_input_before_upload_photos() -> None:
+def test_chatgpt_adapter_prefers_visible_upload_input_before_hidden_upload_files() -> None:
     adapter = ChatGptPageAdapter(start_url="https://chatgpt.com/g/test")
     page = FakeChatGptPage(
         attachment_visible=False,
         has_generated_image=True,
+        upload_files_visible=False,
+        upload_photos_visible=True,
     )
     attempted_inputs: list[object] = []
 
     def fake_upload(current_page: object, file_input: object, frame_path: Path) -> bool:
         del current_page, frame_path
         attempted_inputs.append(file_input)
-        return file_input is page.locators["#upload-files"]
+        return file_input is page.locators["#upload-photos"]
 
     adapter._upload_via_file_input = fake_upload  # type: ignore[method-assign]
     adapter._upload_via_drag_drop = lambda *args: False  # type: ignore[method-assign]
@@ -439,7 +443,7 @@ def test_chatgpt_adapter_prefers_upload_files_input_before_upload_photos() -> No
         ),
     )
 
-    assert attempted_inputs == [page.locators["#upload-files"]]
+    assert attempted_inputs == [page.locators["#upload-photos"]]
     assert page.locators["[data-testid='send-button']"].clicks == 1
     assert result.status == "submitted"
 
